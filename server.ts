@@ -69,59 +69,96 @@ async function startServer() {
       setup: t.setupType
     }));
 
+    const useLocalAI = process.env.USE_LOCAL_AI === "true";
+    const ollamaUrl = process.env.OLLAMA_URL || "http://host.docker.internal:11434";
     const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: "OPENROUTER_API_KEY is not configured." });
+
+    if (!useLocalAI && !apiKey) {
+      return res.status(500).json({ error: "Neither OPENROUTER_API_KEY nor Local AI is configured." });
     }
 
     try {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": process.env.APP_URL || "http://localhost:3000",
-          "X-Title": "QuantNexus AI",
-        },
-        body: JSON.stringify({
-          model: "google/gemini-2.0-flash-001",
-          messages: [
-            {
-              role: "system",
-              content: `You are the QuantNexus "Market Surfer" AI. Your goal is maximum daily/weekly profit.
-              Expertise: Breakout prediction, Reversal detection, Black Swan/Crash protection, and Correlation analysis.
-              
-              SELF-LEARNING CONTEXT (Past Trades):
-              ${JSON.stringify(recentJournal)}
+      let signal;
+      
+      if (useLocalAI) {
+        // Local Ollama Logic
+        const response = await fetch(`${ollamaUrl}/api/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: process.env.OLLAMA_MODEL || "llama3",
+            messages: [
+              {
+                role: "system",
+                content: `You are the QuantNexus "Market Surfer" AI. Return ONLY a JSON object: { 
+                  "signal": "BUY" | "SELL" | "HOLD", 
+                  "setupType": "BREAKOUT" | "REVERSAL" | "SMC_MITIGATION",
+                  "price": number, "tp": number, "sl": number, "confidence": number, 
+                  "reasoning": string,
+                  "marketWave": "SURFING" | "CRASH_WARNING" | "RALLY_EXPECTED"
+                }`
+              },
+              {
+                role: "user",
+                content: `Symbol: ${symbol}, Price: ${chartData.price}, Strategy: ${strategy}, Objects: ${JSON.stringify(chartData.objects)}`
+              }
+            ],
+            stream: false,
+            format: "json"
+          })
+        });
+        const data = await response.json();
+        signal = JSON.parse(data.message.content);
+      } else {
+        // OpenRouter Logic
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": process.env.APP_URL || "http://localhost:3000",
+            "X-Title": "QuantNexus AI",
+          },
+          body: JSON.stringify({
+            model: "google/gemini-2.0-flash-001",
+            messages: [
+              {
+                role: "system",
+                content: `You are the QuantNexus "Market Surfer" AI. Your goal is maximum daily/weekly profit.
+                Expertise: Breakout prediction, Reversal detection, Black Swan/Crash protection, and Correlation analysis.
+                
+                SELF-LEARNING CONTEXT (Past Trades):
+                ${JSON.stringify(recentJournal)}
 
-              Analyze the MT5 data and provide a high-conviction signal. 
-              Predict if a BIG RISE or MARKET CRASH is imminent.
-              Return JSON format: { 
-                "signal": "BUY" | "SELL" | "HOLD", 
-                "setupType": "BREAKOUT" | "REVERSAL" | "SMC_MITIGATION",
-                "price": number, "tp": number, "sl": number, "confidence": number, 
-                "reasoning": string,
-                "marketWave": "SURFING" | "CRASH_WARNING" | "RALLY_EXPECTED"
-              }`
-            },
-            {
-              role: "user",
-              content: `Symbol: ${symbol}
-              Current Price: ${chartData.price}
-              Strategy: ${strategy}
-              MT5 Objects: ${JSON.stringify(chartData.objects)}
-              Price History: ${JSON.stringify(chartData.history.map((h: any) => h.price))}`
-            }
-          ],
-          response_format: { type: "json_object" }
-        })
-      });
+                Analyze the MT5 data and provide a high-conviction signal. 
+                Predict if a BIG RISE or MARKET CRASH is imminent.
+                Return JSON format: { 
+                  "signal": "BUY" | "SELL" | "HOLD", 
+                  "setupType": "BREAKOUT" | "REVERSAL" | "SMC_MITIGATION",
+                  "price": number, "tp": number, "sl": number, "confidence": number, 
+                  "reasoning": string,
+                  "marketWave": "SURFING" | "CRASH_WARNING" | "RALLY_EXPECTED"
+                }`
+              },
+              {
+                role: "user",
+                content: `Symbol: ${symbol}
+                Current Price: ${chartData.price}
+                Strategy: ${strategy}
+                MT5 Objects: ${JSON.stringify(chartData.objects)}
+                Price History: ${JSON.stringify(chartData.history.map((h: any) => h.price))}`
+              }
+            ],
+            response_format: { type: "json_object" }
+          })
+        });
+        const data = await response.json();
+        signal = JSON.parse(data.choices[0].message.content);
+      }
 
-      const data = await response.json();
-      const signal = JSON.parse(data.choices[0].message.content);
       res.json(signal);
     } catch (error) {
-      console.error("OpenRouter Error:", error);
+      console.error("AI Generation Error:", error);
       res.status(500).json({ error: "Failed to generate AI signal." });
     }
   });

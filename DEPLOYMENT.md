@@ -66,11 +66,17 @@ To access the dashboard from your phone while away:
 ## 🤖 Step 6: Using Local AI (Ollama / LM Studio)
 Since you have an **RTX 4060**, you can run models locally to save on API costs!
 
-### Using Ollama:
-1. Open Ollama and run: `ollama run llama3`
-2. In `server.ts`, you can change the fetch URL from OpenRouter to your local Ollama instance:
-   - URL: `http://localhost:11434/api/generate`
-   - (Note: You'll need to adjust the request body format to match Ollama's API).
+### Using Ollama (Docker-to-Docker):
+Since Ollama is also in Docker, you have two options for connection:
+
+1.  **Option A: host.docker.internal (Easiest)**
+    - Set `USE_LOCAL_AI=true`
+    - Set `OLLAMA_URL=http://host.docker.internal:11434`
+    - This allows the QuantNexus container to reach the Ollama service via your Windows host.
+
+2.  **Option B: Docker Network (Recommended)**
+    - Add both containers to the same Docker network.
+    - Set `OLLAMA_URL=http://ollama:11434` (replace `ollama` with your Ollama container name).
 
 ### Using LM Studio:
 1. Load a model in LM Studio.

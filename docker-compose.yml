@@ -6,4 +6,7 @@ services:
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - APP_URL=${APP_URL}
+      - USE_LOCAL_AI=${USE_LOCAL_AI}
+      - OLLAMA_URL=${OLLAMA_URL}
+      - OLLAMA_MODEL=${OLLAMA_MODEL}
     restart: always
