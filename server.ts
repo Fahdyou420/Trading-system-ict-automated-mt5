@@ -5,11 +5,38 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-// --- QuantNexus 2.0 Omni-Strategy State ---
+// --- QuantNexus 3.0 Autonomous AI State ---
 const chartStates: Record<string, any> = {};
 const tradeJournal: any[] = [];
 const activeSignals: Record<string, any> = {};
 const marketInsights: Record<string, any> = {};
+const liveJournal: any[] = [];
+let systemCycle = {
+  status: "IDLE",
+  lastAction: "System initialized",
+  timestamp: Date.now(),
+  activeNodes: ["Technical_Analyst", "Risk_Manager", "Execution_Engine"]
+};
+
+// Admin Configuration (Editable via Dashboard)
+let adminConfig = {
+  theme: {
+    primary: "#00ff9d",
+    secondary: "#00d4ff",
+    background: "#0a0a0c"
+  },
+  strategy: {
+    minConfidence: 75,
+    autoExecute: false,
+    maxDrawdown: 5.0
+  },
+  indicators: {
+    rsiPeriod: 14,
+    macdFast: 12,
+    macdSlow: 26
+  }
+};
+
 let lastSyncTimestamp = 0;
 let lastRawSyncBody: any = null;
 
@@ -268,6 +295,112 @@ function calculateDynamicWeights() {
   return strategyWeights;
 }
 
+// --- Autonomous AI Cycle Engine ---
+async function runAutonomousCycle() {
+  const symbols = Object.keys(chartStates);
+  if (symbols.length === 0) return;
+
+  systemCycle = { ...systemCycle, status: "SCANNING", lastAction: `Scanning ${symbols.length} markets`, timestamp: Date.now() };
+  
+  for (const symbol of symbols) {
+    const chartData = chartStates[symbol];
+    if (Date.now() - chartData.lastUpdate > 30000) continue; // Skip stale data
+
+    systemCycle = { ...systemCycle, status: "ANALYZING", lastAction: `Analyzing ${symbol} structure`, timestamp: Date.now() };
+    
+    // Evaluate strategies mathematically first
+    const confluences = evaluateStrategies(chartData);
+    const activeCount = Object.values(confluences).filter(v => v).length;
+
+    if (activeCount >= 3) {
+      systemCycle = { ...systemCycle, status: "EXECUTING", lastAction: `Generating AI Signal for ${symbol}`, timestamp: Date.now() };
+      await generateAISignal(symbol, "OMNI_AUTO");
+    } else {
+      // Live Journaling: Why no entry?
+      const reason = `No entry for ${symbol}: Only ${activeCount} confluences active. Required: 3.`;
+      if (liveJournal.length === 0 || liveJournal[0].message !== reason) {
+        liveJournal.unshift({
+          timestamp: new Date().toISOString(),
+          symbol,
+          message: reason,
+          data: { confluences }
+        });
+        if (liveJournal.length > 50) liveJournal.pop();
+      }
+    }
+  }
+
+  systemCycle = { ...systemCycle, status: "IDLE", lastAction: "Cycle completed. Waiting for next sync.", timestamp: Date.now() };
+}
+
+// Start the autonomous cycle loop
+setInterval(runAutonomousCycle, 10000);
+
+// --- Multi-Model AI Engine (OpenRouter) ---
+async function generateAISignal(symbol: string, strategy: string) {
+  const chartData = chartStates[symbol];
+  if (!chartData) return null;
+
+  const confluences = evaluateStrategies(chartData);
+  const currentWeights = calculateDynamicWeights();
+  const apiKey = process.env.OPENROUTER_API_KEY;
+
+  if (!apiKey) {
+    console.error("OpenRouter API Key missing!");
+    return null;
+  }
+
+  // Node 1: Technical Analyst (Gemini 2.0 Flash)
+  const analystPrompt = `Analyze ${symbol} at ${chartData.price}. 
+  Confluences: ${JSON.stringify(confluences)}. 
+  Weights: ${JSON.stringify(currentWeights)}.
+  Identify the current market cycle (Accumulation, Trend, Distribution) and the highest probability setup.`;
+
+  // Node 2: Risk Manager (DeepSeek or similar via OpenRouter)
+  const riskPrompt = `Given a potential trade on ${symbol}, calculate optimal TP/SL based on ATR and structure. 
+  Current Price: ${chartData.price}. 
+  Swings: ${JSON.stringify(chartData.swings)}.`;
+
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "google/gemini-2.0-flash-001",
+        messages: [
+          { role: "system", content: "You are the QuantNexus 3.0 Multi-Model Execution Engine. Return ONLY JSON." },
+          { role: "user", content: `${analystPrompt}\n${riskPrompt}\nReturn a JSON signal: { "signal": "BUY"|"SELL"|"HOLD", "tp": number, "sl": number, "confidence": number, "mentorInsight": string, "setupType": string }` }
+        ],
+        response_format: { type: "json_object" }
+      })
+    });
+
+    const data = await response.json();
+    const signal = JSON.parse(data.choices[0].message.content);
+
+    if (signal.signal !== "HOLD") {
+      activeSignals[symbol] = {
+        ...signal,
+        id: Date.now(),
+        timestamp: new Date().toISOString(),
+        visualObjects: calculateVisualObjects(chartData, signal)
+      };
+
+      liveJournal.unshift({
+        timestamp: new Date().toISOString(),
+        symbol,
+        message: `SIGNAL GENERATED: ${signal.signal} @ ${chartData.price}`,
+        data: signal
+      });
+    }
+
+    return signal;
+  } catch (error) {
+    console.error("AI Engine Error:", error);
+    return null;
+  }
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -391,11 +524,29 @@ async function startServer() {
         activeSymbols: Object.keys(chartStates),
         lastSyncTime: lastSyncTimestamp,
         lastRawSync: lastRawSyncBody,
-        strategyWeights
+        strategyWeights,
+        systemCycle,
+        adminConfig
       });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch status" });
     }
+  });
+
+  app.get("/api/live-journal", (req, res) => {
+    res.json(liveJournal);
+  });
+
+  app.post("/api/admin/config", (req, res) => {
+    adminConfig = { ...adminConfig, ...req.body };
+    res.json({ status: "ok", config: adminConfig });
+  });
+
+  // n8n Webhook Endpoint
+  app.post("/api/webhooks/n8n", (req, res) => {
+    console.log("[n8n Webhook Received]:", req.body);
+    // Trigger actions based on n8n input
+    res.json({ status: "received" });
   });
 
   // API Route for AI Signal Generation (QuantNexus 2.0 Weighted Matrix)

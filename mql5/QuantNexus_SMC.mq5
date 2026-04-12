@@ -149,7 +149,11 @@ void OnTick()
    CheckTradeClosures();
    
    // 5. Update On-Chart Visuals
-   if(InpShowVisuals) UpdateChartVisuals(obLevel, isHTFBullish);
+   if(InpShowVisuals) {
+      UpdateChartVisuals(obLevel, isHTFBullish);
+      DrawFVGZones();
+      DrawLiquidityZones();
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -419,9 +423,10 @@ void DrawHistoricalStructure() {
 void DrawMentorUI(string insight) {
    string name = "QN_Mentor_Box";
    string labelName = "QN_Mentor_Text";
+   string titleName = "QN_Mentor_Title";
    
    int x = 20, y = 100;
-   int width = 350, height = 80;
+   int width = 350, height = 100;
    
    if(ObjectFind(0, name) < 0) {
       ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
@@ -429,26 +434,80 @@ void DrawMentorUI(string insight) {
       ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
       ObjectSetInteger(0, name, OBJPROP_XSIZE, width);
       ObjectSetInteger(0, name, OBJPROP_YSIZE, height);
-      ObjectSetInteger(0, name, OBJPROP_BGCOLOR, C'20,20,23');
+      ObjectSetInteger(0, name, OBJPROP_BGCOLOR, C'15,15,18');
       ObjectSetInteger(0, name, OBJPROP_BORDER_COLOR, clrDeepSkyBlue);
       ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
    }
    
+   if(ObjectFind(0, titleName) < 0) {
+      ObjectCreate(0, titleName, OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, titleName, OBJPROP_XDISTANCE, x + 10);
+      ObjectSetInteger(0, titleName, OBJPROP_YDISTANCE, y + 10);
+      ObjectSetInteger(0, titleName, OBJPROP_COLOR, clrDeepSkyBlue);
+      ObjectSetString(0, titleName, OBJPROP_FONT, "JetBrains Mono");
+      ObjectSetInteger(0, titleName, OBJPROP_FONTSIZE, 10);
+      ObjectSetString(0, titleName, OBJPROP_TEXT, "QUANTNEXUS AI MENTOR");
+   }
+   
    if(ObjectFind(0, labelName) < 0) {
       ObjectCreate(0, labelName, OBJ_LABEL, 0, 0, 0);
       ObjectSetInteger(0, labelName, OBJPROP_XDISTANCE, x + 10);
-      ObjectSetInteger(0, labelName, OBJPROP_YDISTANCE, y + 10);
+      ObjectSetInteger(0, labelName, OBJPROP_YDISTANCE, y + 35);
       ObjectSetInteger(0, labelName, OBJPROP_COLOR, clrWhite);
       ObjectSetString(0, labelName, OBJPROP_FONT, "JetBrains Mono");
       ObjectSetInteger(0, labelName, OBJPROP_FONTSIZE, 9);
    }
    
    // Wrap text if too long
-   string wrapped = "AI MENTOR: " + insight;
+   string wrapped = insight;
    if(StringLen(wrapped) > 60) wrapped = StringSubstr(wrapped, 0, 57) + "...";
    
    ObjectSetString(0, labelName, OBJPROP_TEXT, wrapped);
+}
+
+void DrawFVGZones() {
+   MqlRates rates[];
+   ArraySetAsSeries(rates, true);
+   if(CopyRates(_Symbol, _Period, 0, 50, rates) < 50) return;
+
+   for(int i=1; i<48; i++) {
+      // Bullish FVG
+      if(rates[i+1].high < rates[i-1].low && rates[i].close > rates[i].open) {
+         string name = "QN_FVG_BULL_" + IntegerToString(i);
+         DrawRectangle(name, rates[i+1].time, rates[i+1].high, TimeCurrent() + 3600, rates[i-1].low, clrMediumSpringGreen);
+         ObjectSetInteger(0, name, OBJPROP_FILL, true);
+         ObjectSetInteger(0, name, OBJPROP_BACK, true);
+         ObjectSetInteger(0, name, OBJPROP_COLOR, ColorToARGB(clrMediumSpringGreen, 50));
+      }
+      // Bearish FVG
+      if(rates[i+1].low > rates[i-1].high && rates[i].close < rates[i].open) {
+         string name = "QN_FVG_BEAR_" + IntegerToString(i);
+         DrawRectangle(name, rates[i+1].time, rates[i+1].low, TimeCurrent() + 3600, rates[i-1].high, clrTomato);
+         ObjectSetInteger(0, name, OBJPROP_FILL, true);
+         ObjectSetInteger(0, name, OBJPROP_BACK, true);
+         ObjectSetInteger(0, name, OBJPROP_COLOR, ColorToARGB(clrTomato, 50));
+      }
+   }
+}
+
+void DrawLiquidityZones() {
+   double High[], Low[];
+   ArraySetAsSeries(High, true);
+   ArraySetAsSeries(Low, true);
+   CopyHigh(_Symbol, _Period, 0, 100, High);
+   CopyLow(_Symbol, _Period, 0, 100, Low);
+
+   for(int i=2; i<98; i++) {
+      // Equal Highs (Liquidity)
+      if(MathAbs(High[i] - High[i+1]) < 2 * _Point) {
+         string name = "QN_LIQ_H_" + IntegerToString(i);
+         ObjectCreate(0, name, OBJ_HLINE, 0, 0, High[i]);
+         ObjectSetInteger(0, name, OBJPROP_COLOR, clrYellow);
+         ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_DASH);
+         ObjectSetString(0, name, OBJPROP_TEXT, "LIQUIDITY (EQH)");
+      }
+   }
 }
 
 //+------------------------------------------------------------------+

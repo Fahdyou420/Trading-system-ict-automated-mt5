@@ -139,11 +139,12 @@ export default function App() {
   const [activeCharts, setActiveCharts] = useState<any>({});
   const [selectedSymbol, setSelectedSymbol] = useState<string>('');
   const [journal, setJournal] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'JOURNAL' | 'SURFER' | 'SETTINGS'>('DASHBOARD');
+  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'JOURNAL' | 'SURFER' | 'SIGNALS' | 'ADMIN'>('DASHBOARD');
   const [isOnline, setIsOnline] = useState(false);
   const [journalStats, setJournalStats] = useState<any>(null);
   const [serverStatus, setServerStatus] = useState<any>(null);
   const [marketInsights, setMarketInsights] = useState<any>({});
+  const [liveJournalEntries, setLiveJournalEntries] = useState<any[]>([]);
 
   const [autoExecute, setAutoExecute] = useState(false);
 
@@ -179,15 +180,17 @@ export default function App() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [journalRes, statsRes, statusRes] = await Promise.all([
+        const [journalRes, statsRes, statusRes, liveJournalRes] = await Promise.all([
           fetch('/api/journal'),
           fetch('/api/journal/stats'),
-          fetch('/api/status')
+          fetch('/api/status'),
+          fetch('/api/live-journal')
         ]);
         
         if (journalRes.ok) setJournal(await journalRes.json());
         if (statsRes.ok) setJournalStats(await statsRes.json());
         if (statusRes.ok) setServerStatus(await statusRes.json());
+        if (liveJournalRes.ok) setLiveJournalEntries(await liveJournalRes.json());
       } catch (error) {
         console.error('Fetch Data Error:', error);
       }
@@ -242,7 +245,8 @@ export default function App() {
               { id: 'DASHBOARD', icon: LayoutDashboard },
               { id: 'JOURNAL', icon: History },
               { id: 'SURFER', icon: Waves },
-              { id: 'SETTINGS', icon: Settings }
+              { id: 'SIGNALS', icon: Zap },
+              { id: 'ADMIN', icon: Settings }
             ].map(tab => (
               <button 
                 key={tab.id}
@@ -290,8 +294,40 @@ export default function App() {
       <main className="flex-1 p-8 max-w-7xl mx-auto w-full">
         {activeTab === 'DASHBOARD' && (
           <div className="grid grid-cols-12 gap-6">
-            {/* Left Sidebar: Marketwatch & Correlation */}
+            {/* Left Sidebar: Marketwatch & Live AI Activity */}
             <div className="col-span-12 lg:col-span-3 flex flex-col gap-6">
+              {/* Live AI Activity Node */}
+              <div className="glass-panel p-6 border-brand-primary/30 bg-brand-primary/5">
+                <h3 className="font-display font-bold text-sm mb-4 flex items-center gap-2 text-brand-primary">
+                  <BrainCircuit className="w-4 h-4 animate-pulse" />
+                  Autonomous Cycle
+                </h3>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-gray-500 uppercase">Status</span>
+                    <span className={cn(
+                      "px-2 py-0.5 rounded text-[10px] font-bold",
+                      serverStatus?.systemCycle?.status === 'IDLE' ? "bg-gray-500/10 text-gray-400" : "bg-brand-primary/10 text-brand-primary animate-pulse"
+                    )}>
+                      {serverStatus?.systemCycle?.status || 'OFFLINE'}
+                    </span>
+                  </div>
+                  <div className="p-3 bg-black/40 rounded-lg border border-white/5">
+                    <p className="text-[10px] text-gray-400 font-mono leading-relaxed">
+                      <span className="text-brand-secondary mr-2">{'>'}</span>
+                      {serverStatus?.systemCycle?.lastAction}
+                    </p>
+                  </div>
+                  <div className="flex gap-1.5">
+                    {serverStatus?.systemCycle?.activeNodes?.map((node: string) => (
+                      <div key={node} className="p-1 bg-white/5 rounded border border-white/10" title={node}>
+                        <Cpu className="w-3 h-3 text-brand-secondary" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
               <div className="glass-panel p-6">
                 <h3 className="font-display font-bold text-sm mb-6 flex items-center gap-2">
                   <Activity className="w-4 h-4 text-brand-secondary" />
@@ -452,6 +488,35 @@ export default function App() {
                       })}
                     </ComposedChart>
                   </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Live Journal / Why no entry? */}
+              <div className="glass-panel p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="font-display font-bold text-lg flex items-center gap-2">
+                    <Terminal className="w-5 h-5 text-brand-secondary" />
+                    Live AI Journal
+                  </h3>
+                  <span className="text-[10px] font-mono text-gray-500">Real-time Logic</span>
+                </div>
+                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                  {liveJournalEntries.map((entry, idx) => (
+                    <div key={idx} className="p-3 bg-white/5 rounded-lg border border-white/5 hover:border-brand-secondary/30 transition-all group">
+                      <div className="flex justify-between items-start mb-1">
+                        <span className="text-[10px] font-bold text-brand-secondary">{entry.symbol}</span>
+                        <span className="text-[8px] text-gray-600 font-mono">{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                      </div>
+                      <p className="text-[10px] text-gray-400 leading-relaxed group-hover:text-gray-200 transition-colors">
+                        {entry.message}
+                      </p>
+                    </div>
+                  ))}
+                  {liveJournalEntries.length === 0 && (
+                    <div className="py-10 text-center text-gray-500 text-[10px] italic">
+                      Waiting for AI cycle to start...
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -772,62 +837,128 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === 'SETTINGS' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="glass-panel p-6">
-              <h3 className="font-display font-bold text-lg mb-6 flex items-center gap-2">
-                <Settings className="w-5 h-5 text-brand-primary" />
-                System Configuration
-              </h3>
-              <div className="space-y-6">
-                <div>
-                  <label className="text-[10px] text-gray-500 uppercase tracking-widest block mb-2">Active Strategy</label>
-                  <select 
-                    value={activeStrategy}
-                    onChange={(e) => setActiveStrategy(e.target.value)}
-                    className="w-full bg-brand-bg border border-brand-border text-sm p-3 rounded-xl outline-none focus:border-brand-primary transition-colors"
-                  >
-                    <option value="SMC">STRAT_SMC (Smart Money Concepts)</option>
-                    <option value="BREAKOUT">BREAKOUT_PRO (Momentum)</option>
-                    <option value="REVERSAL">REVERSAL_KING (Mean Reversion)</option>
-                  </select>
-                </div>
-                
-                <div className="p-4 bg-brand-primary/5 border border-brand-primary/20 rounded-xl">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-xs font-bold">Local AI Status</span>
-                    <span className={cn(
-                      "px-2 py-0.5 rounded text-[8px] font-bold",
-                      serverStatus?.ollamaConnected ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"
-                    )}>
-                      {serverStatus?.ollamaConnected ? 'ONLINE' : 'OFFLINE'}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-gray-400">
-                    Ollama is running on your local machine. Using model: {(import.meta as any).env?.VITE_OLLAMA_MODEL || 'hhao/qwen2.5-coder-tools:latest'}
-                  </p>
-                </div>
+        {activeTab === 'SIGNALS' && (
+          <div className="flex flex-col gap-8">
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-3xl font-display font-bold text-white">AI Signal Matrix</h2>
+                <p className="text-gray-500 text-sm">High-conviction setups generated by the Multi-Model Engine</p>
               </div>
             </div>
 
-            <div className="glass-panel p-6">
-              <h3 className="font-display font-bold text-lg mb-6 flex items-center gap-2">
-                <Shield className="w-5 h-5 text-brand-secondary" />
-                Risk Management
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {Object.keys(activeCharts).map((symbol: string) => {
+                const signal = serverStatus?.activeSignals?.[symbol];
+                const chart = activeCharts[symbol];
+                return (
+                  <div key={symbol} className="glass-panel p-6 relative overflow-hidden">
+                    <div className="flex justify-between items-start mb-6">
+                      <div>
+                        <h3 className="text-xl font-bold">{symbol}</h3>
+                        <p className="text-[10px] text-gray-500 font-mono">${chart.price}</p>
+                      </div>
+                      {signal ? (
+                        <span className={cn(
+                          "px-3 py-1 rounded text-[10px] font-bold",
+                          signal.signal === 'BUY' ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+                        )}>
+                          {signal.signal}
+                        </span>
+                      ) : (
+                        <span className="px-3 py-1 bg-gray-800 text-gray-500 rounded text-[10px] font-bold">
+                          SCANNING
+                        </span>
+                      )}
+                    </div>
+
+                    {signal ? (
+                      <div className="space-y-4">
+                        <div className="p-3 bg-brand-primary/5 border border-brand-primary/10 rounded-lg">
+                          <p className="text-[10px] text-brand-primary font-bold uppercase mb-1">{signal.setupType}</p>
+                          <p className="text-xs text-gray-300 italic">"{signal.mentorInsight}"</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="p-2 bg-black/20 rounded border border-white/5 text-center">
+                            <p className="text-[8px] text-gray-500 uppercase">TP</p>
+                            <p className="text-xs font-mono text-green-400">{signal.tp}</p>
+                          </div>
+                          <div className="p-2 bg-black/20 rounded border border-white/5 text-center">
+                            <p className="text-[8px] text-gray-500 uppercase">SL</p>
+                            <p className="text-xs font-mono text-red-400">{signal.sl}</p>
+                          </div>
+                        </div>
+                        <div className="flex justify-between items-center text-[10px]">
+                          <span className="text-gray-500">Confidence</span>
+                          <span className="text-brand-primary font-bold">{signal.confidence}%</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="py-10 text-center text-gray-600 text-[10px] italic">
+                        No active signal for this pair.
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'ADMIN' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="glass-panel p-8">
+              <h3 className="font-display font-bold text-xl mb-8 flex items-center gap-3">
+                <Settings className="w-6 h-6 text-brand-primary" />
+                Admin Terminal
               </h3>
-              <div className="space-y-4">
-                <div className="flex justify-between items-center p-3 bg-brand-bg border border-brand-border rounded-xl">
-                  <span className="text-xs">Max Daily Drawdown</span>
-                  <span className="text-xs font-mono text-red-400">5.0%</span>
+              
+              <div className="space-y-8">
+                <div className="space-y-4">
+                  <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Strategy Parameters</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] text-gray-500 uppercase">Min Confidence %</label>
+                      <input type="number" defaultValue={serverStatus?.adminConfig?.strategy?.minConfidence} className="w-full bg-black/40 border border-brand-border p-2 rounded text-xs outline-none focus:border-brand-primary" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] text-gray-500 uppercase">Max Drawdown %</label>
+                      <input type="number" defaultValue={serverStatus?.adminConfig?.strategy?.maxDrawdown} className="w-full bg-black/40 border border-brand-border p-2 rounded text-xs outline-none focus:border-brand-primary" />
+                    </div>
+                  </div>
                 </div>
-                <div className="flex justify-between items-center p-3 bg-brand-bg border border-brand-border rounded-xl">
-                  <span className="text-xs">Initial TP Multiplier</span>
-                  <span className="text-xs font-mono text-green-400">2.0x SL</span>
+
+                <div className="space-y-4">
+                  <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest">UI Customization</h4>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] text-gray-500 uppercase">Primary</label>
+                      <div className="flex gap-2 items-center">
+                        <div className="w-6 h-6 rounded border border-white/10" style={{ backgroundColor: serverStatus?.adminConfig?.theme?.primary }} />
+                        <input type="text" defaultValue={serverStatus?.adminConfig?.theme?.primary} className="w-full bg-black/40 border border-brand-border p-2 rounded text-[10px] outline-none" />
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex justify-between items-center p-3 bg-brand-bg border border-brand-border rounded-xl">
-                  <span className="text-xs">Auto-Signal Generation</span>
-                  <span className="text-xs font-mono text-brand-primary">ENABLED</span>
-                </div>
+
+                <button className="w-full py-3 bg-brand-primary text-brand-bg font-bold rounded-xl shadow-[0_0_20px_rgba(0,255,157,0.2)] hover:shadow-[0_0_30px_rgba(0,255,157,0.4)] transition-all uppercase tracking-widest text-xs">
+                  Save Configuration
+                </button>
+              </div>
+            </div>
+
+            <div className="glass-panel p-8 border-brand-secondary/30 bg-brand-secondary/5">
+              <h3 className="font-display font-bold text-xl mb-8 flex items-center gap-3">
+                <Terminal className="w-6 h-6 text-brand-secondary" />
+                System Logs
+              </h3>
+              <div className="space-y-3 font-mono text-[10px] text-gray-400 max-h-[500px] overflow-y-auto pr-4 custom-scrollbar">
+                <p><span className="text-brand-secondary">[SYSTEM]</span> QuantNexus 3.0 Core Online</p>
+                <p><span className="text-brand-secondary">[SYSTEM]</span> Multi-Model Engine Initialized (Gemini 2.0 Flash)</p>
+                <p><span className="text-brand-secondary">[SYSTEM]</span> Autonomous Cycle Loop: 10s</p>
+                <p><span className="text-brand-secondary">[SYSTEM]</span> n8n Webhook Listener: Active</p>
+                {liveJournalEntries.slice(0, 10).map((entry, i) => (
+                  <p key={i}><span className="text-gray-600">[{new Date(entry.timestamp).toLocaleTimeString()}]</span> {entry.message}</p>
+                ))}
               </div>
             </div>
           </div>
