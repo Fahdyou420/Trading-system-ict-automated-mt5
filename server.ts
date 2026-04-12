@@ -15,6 +15,14 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Request logging for debugging
+  app.use((req, res, next) => {
+    if (req.url.startsWith('/api')) {
+      console.log(`[API Request] ${req.method} ${req.url}`);
+    }
+    next();
+  });
+
   // API Route for MT5 Data Sync
   app.post("/api/mt5/sync", (req, res) => {
     const { symbol, price, strategy, objects, events } = req.body;
@@ -191,6 +199,12 @@ async function startServer() {
     } catch (error) {
       res.status(500).json({ error: "AI Analysis failed" });
     }
+  });
+
+  // Catch-all for undefined API routes to prevent falling through to SPA fallback
+  app.all("/api/*", (req, res) => {
+    console.warn(`[API 404] ${req.method} ${req.url}`);
+    res.status(404).json({ error: `API route not found: ${req.method} ${req.url}` });
   });
 
   // Vite middleware for development

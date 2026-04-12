@@ -148,6 +148,10 @@ export default function App() {
     const interval = setInterval(async () => {
       try {
         const response = await fetch('/api/mt5/charts');
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 100)}`);
+        }
         const data = await response.json();
         setActiveCharts(data);
         if (!selectedSymbol && Object.keys(data).length > 0) {
