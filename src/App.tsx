@@ -14,7 +14,16 @@ import {
   Terminal,
   Cpu,
   Waves,
-  ShieldAlert
+  ShieldAlert,
+  Settings,
+  History,
+  LayoutDashboard,
+  Wifi,
+  WifiOff,
+  Wallet,
+  Percent,
+  ArrowUpRight,
+  ArrowDownRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -29,24 +38,6 @@ import {
   Line
 } from 'recharts';
 import { cn } from '@/src/lib/utils';
-
-// --- Mock Data ---
-const PERFORMANCE_DATA = [
-  { time: '09:00', equity: 100000, drawdown: 0 },
-  { time: '10:00', equity: 100500, drawdown: 0.2 },
-  { time: '11:00', equity: 101200, drawdown: 0.1 },
-  { time: '12:00', equity: 100800, drawdown: 0.5 },
-  { time: '13:00', equity: 102500, drawdown: 0.3 },
-  { time: '14:00', equity: 104000, drawdown: 0.1 },
-  { time: '15:00', equity: 103800, drawdown: 0.4 },
-  { time: '16:00', equity: 105200, drawdown: 0.2 },
-];
-
-const ACTIVE_SETUPS = [
-  { id: 1, pair: 'EURUSD', type: 'LONG', zone: '1.08450', status: 'Monitoring', confluence: 85 },
-  { id: 2, pair: 'GBPUSD', type: 'SHORT', zone: '1.26700', status: 'Pending', confluence: 72 },
-  { id: 3, pair: 'XAUUSD', type: 'LONG', zone: '2155.20', status: 'Executing', confluence: 94 },
-];
 
 // --- Components ---
 
@@ -142,7 +133,10 @@ export default function App() {
   const [activeCharts, setActiveCharts] = useState<any>({});
   const [selectedSymbol, setSelectedSymbol] = useState<string>('');
   const [journal, setJournal] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'JOURNAL' | 'SURFER'>('DASHBOARD');
+  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'JOURNAL' | 'SURFER' | 'SETTINGS'>('DASHBOARD');
+  const [isOnline, setIsOnline] = useState(false);
+  const [journalStats, setJournalStats] = useState<any>(null);
+  const [serverStatus, setServerStatus] = useState<any>(null);
 
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -154,23 +148,38 @@ export default function App() {
         }
         const data = await response.json();
         setActiveCharts(data);
+        setIsOnline(Object.keys(data).length > 0);
+        
         if (!selectedSymbol && Object.keys(data).length > 0) {
           setSelectedSymbol(Object.keys(data)[0]);
         }
       } catch (error) {
         console.error('Fetch Charts Error:', error);
+        setIsOnline(false);
       }
     }, 1000);
     return () => clearInterval(interval);
   }, [selectedSymbol]);
 
   useEffect(() => {
-    const fetchJournal = async () => {
-      const res = await fetch('/api/journal');
-      const data = await res.json();
-      setJournal(data);
+    const fetchData = async () => {
+      try {
+        const [journalRes, statsRes, statusRes] = await Promise.all([
+          fetch('/api/journal'),
+          fetch('/api/journal/stats'),
+          fetch('/api/status')
+        ]);
+        
+        if (journalRes.ok) setJournal(await journalRes.json());
+        if (statsRes.ok) setJournalStats(await statsRes.json());
+        if (statusRes.ok) setServerStatus(await statusRes.json());
+      } catch (error) {
+        console.error('Fetch Data Error:', error);
+      }
     };
-    fetchJournal();
+    fetchData();
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
   }, [activeTab]);
 
   const handleSync = () => {
@@ -214,30 +223,48 @@ export default function App() {
           </h1>
           <div className="h-4 w-[1px] bg-brand-border mx-2" />
           <div className="flex gap-4">
-            {['DASHBOARD', 'JOURNAL', 'SURFER'].map(tab => (
+            {[
+              { id: 'DASHBOARD', icon: LayoutDashboard },
+              { id: 'JOURNAL', icon: History },
+              { id: 'SURFER', icon: Waves },
+              { id: 'SETTINGS', icon: Settings }
+            ].map(tab => (
               <button 
-                key={tab}
-                onClick={() => setActiveTab(tab as any)}
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
                 className={cn(
-                  "text-[10px] font-bold tracking-widest transition-colors",
-                  activeTab === tab ? "text-brand-primary" : "text-gray-500 hover:text-gray-300"
+                  "flex items-center gap-2 text-[10px] font-bold tracking-widest transition-colors px-3 py-2 rounded-lg",
+                  activeTab === tab.id ? "text-brand-primary bg-brand-primary/10" : "text-gray-500 hover:text-gray-300 hover:bg-white/5"
                 )}
               >
-                {tab}
+                <tab.icon className="w-3.5 h-3.5" />
+                {tab.id}
               </button>
             ))}
           </div>
         </div>
 
         <div className="flex items-center gap-6">
+          <div className={cn(
+            "flex items-center gap-2 px-3 py-1 rounded-full border text-[10px] font-bold",
+            isOnline ? "bg-green-500/10 border-green-500/20 text-green-400" : "bg-red-500/10 border-red-500/20 text-red-400"
+          )}>
+            {isOnline ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+            {isOnline ? 'MT5 CONNECTED' : 'MT5 DISCONNECTED'}
+          </div>
+          
           <select 
             value={selectedSymbol} 
             onChange={(e) => setSelectedSymbol(e.target.value)}
             className="bg-brand-bg border border-brand-border text-xs font-mono text-brand-primary px-3 py-1 rounded outline-none"
           >
-            {Object.keys(activeCharts).map(s => (
-              <option key={s} value={s}>{s}</option>
-            ))}
+            {Object.keys(activeCharts).length > 0 ? (
+              Object.keys(activeCharts).map(s => (
+                <option key={s} value={s}>{s} - ${activeCharts[s].price}</option>
+              ))
+            ) : (
+              <option value="">No Active Symbols</option>
+            )}
           </select>
           <button onClick={handleSync} className="p-2 hover:bg-white/5 rounded-lg transition-colors">
             <RefreshCw className={cn("w-5 h-5 text-gray-400", isSyncing && "animate-spin text-brand-primary")} />
@@ -250,10 +277,31 @@ export default function App() {
           <div className="grid grid-cols-12 gap-6">
             {/* Top Stats */}
             <div className="col-span-12 grid grid-cols-1 md:grid-cols-4 gap-6">
-              <StatCard title="Account Balance" value={`$${(currentChart.price * 100000 || 105240).toLocaleString()}`} subValue={`Active Symbol: ${selectedSymbol}`} icon={TrendingUp} trend={5.24} />
-              <StatCard title="Current Price" value={currentChart.price || '0.00000'} subValue="Real-time MT5 Feed" icon={Activity} trend={0.1} />
-              <StatCard title="Market Wave" value={aiSignal?.marketWave || 'SURFING'} subValue="AI Sentiment Analysis" icon={Waves} />
-              <StatCard title="Win Rate" value="68.4%" subValue="Last 30 Days" icon={Target} />
+              <StatCard 
+                title="Account Balance" 
+                value={`$${(currentChart.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`} 
+                subValue={`Equity: $${(currentChart.equity || 0).toLocaleString()}`} 
+                icon={Wallet} 
+                trend={currentChart.drawdown ? -currentChart.drawdown : 0} 
+              />
+              <StatCard 
+                title="Current Price" 
+                value={currentChart.price || '0.00000'} 
+                subValue={`Strategy: ${currentChart.strategy || 'None'}`} 
+                icon={Activity} 
+              />
+              <StatCard 
+                title="Market Wave" 
+                value={aiSignal?.marketWave || 'SURFING'} 
+                subValue={aiSignal ? `Confidence: ${aiSignal.confidence}%` : "Waiting for AI..."} 
+                icon={Waves} 
+              />
+              <StatCard 
+                title="Win Rate" 
+                value={journalStats ? `${journalStats.winRate.toFixed(1)}%` : '0%'} 
+                subValue={`Total Trades: ${journalStats?.totalTrades || 0}`} 
+                icon={Target} 
+              />
             </div>
 
             {/* Main Chart */}
@@ -286,6 +334,61 @@ export default function App() {
                       <Area type="monotone" dataKey="price" stroke="#00ff9d" strokeWidth={2} fillOpacity={1} fill="url(#colorPrice)" isAnimationActive={false} />
                     </AreaChart>
                   </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Open Positions */}
+              <div className="glass-panel p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="font-display font-bold text-lg flex items-center gap-2">
+                    <Layers className="w-5 h-5 text-brand-primary" />
+                    Open Positions
+                  </h3>
+                  <span className="text-[10px] font-mono text-gray-500">
+                    {currentChart.openPositions?.length || 0} Active Trades
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="text-[10px] text-gray-500 uppercase tracking-widest border-b border-brand-border">
+                        <th className="pb-3 font-medium">Symbol</th>
+                        <th className="pb-3 font-medium">Type</th>
+                        <th className="pb-3 font-medium">Size</th>
+                        <th className="pb-3 font-medium">Entry</th>
+                        <th className="pb-3 font-medium">Current</th>
+                        <th className="pb-3 font-medium text-right">Profit</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-xs font-mono">
+                      {currentChart.openPositions?.map((pos: any, idx: number) => (
+                        <tr key={idx} className="border-b border-brand-border/50 last:border-0 hover:bg-white/5 transition-colors">
+                          <td className="py-3 font-bold">{pos.symbol}</td>
+                          <td className="py-3">
+                            <span className={cn(
+                              "px-1.5 py-0.5 rounded text-[10px] font-bold",
+                              pos.type === 'BUY' ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"
+                            )}>
+                              {pos.type}
+                            </span>
+                          </td>
+                          <td className="py-3">{pos.volume}</td>
+                          <td className="py-3">{pos.openPrice}</td>
+                          <td className="py-3">{pos.currentPrice}</td>
+                          <td className={cn("py-3 text-right font-bold", pos.profit >= 0 ? "text-green-400" : "text-red-400")}>
+                            ${pos.profit.toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                      {(!currentChart.openPositions || currentChart.openPositions.length === 0) && (
+                        <tr>
+                          <td colSpan={6} className="py-8 text-center text-gray-500 italic">
+                            No open positions detected on MT5.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
@@ -369,44 +472,47 @@ export default function App() {
         )}
 
         {activeTab === 'JOURNAL' && (
-          <div className="glass-panel p-8">
-            <div className="flex justify-between items-center mb-8">
-              <h3 className="font-display font-bold text-2xl">Trade Journal & Self-Learning</h3>
-              <div className="flex gap-4">
-                <div className="text-right">
-                  <p className="text-[10px] text-gray-500 uppercase">Total Profit</p>
-                  <p className="text-xl font-mono text-brand-primary">+$12,450.00</p>
-                </div>
-              </div>
+          <div className="flex flex-col gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <StatCard title="Total Trades" value={journalStats?.totalTrades || 0} subValue="Lifetime" icon={History} />
+              <StatCard title="Win Rate" value={`${journalStats?.winRate.toFixed(1) || 0}%`} subValue="Accuracy" icon={Target} trend={2.5} />
+              <StatCard title="Total Profit" value={`$${journalStats?.totalProfit.toLocaleString() || 0}`} subValue="Net P/L" icon={Wallet} trend={12.4} />
+              <StatCard title="Profit Factor" value={journalStats?.profitFactor || '0.00'} subValue="Efficiency" icon={Activity} />
             </div>
-            <div className="space-y-4">
-              {journal.map((trade, idx) => (
-                <div key={idx} className="p-4 bg-brand-bg border border-brand-border rounded-xl flex flex-col gap-3">
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center gap-4">
-                      <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold", trade.profit > 0 ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400")}>
-                        {trade.profit > 0 ? 'WIN' : 'LOSS'}
+
+            <div className="glass-panel p-8">
+              <div className="flex justify-between items-center mb-8">
+                <h3 className="font-display font-bold text-2xl">Trade Journal & Self-Learning</h3>
+              </div>
+              <div className="space-y-4">
+                {journal.map((trade, idx) => (
+                  <div key={idx} className="p-4 bg-brand-bg border border-brand-border rounded-xl flex flex-col gap-3">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-4">
+                        <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold", trade.profit > 0 ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400")}>
+                          {trade.profit > 0 ? 'WIN' : 'LOSS'}
+                        </span>
+                        <span className="text-sm font-bold">{trade.symbol}</span>
+                        <span className="text-xs text-gray-500">{new Date(trade.timestamp).toLocaleString()}</span>
+                      </div>
+                      <span className={cn("font-mono font-bold", trade.profit > 0 ? "text-green-400" : "text-red-400")}>
+                        {trade.profit > 0 ? '+' : ''}{trade.profit.toFixed(2)}
                       </span>
-                      <span className="text-sm font-bold">{trade.symbol}</span>
-                      <span className="text-xs text-gray-500">{trade.timestamp}</span>
                     </div>
-                    <span className={cn("font-mono font-bold", trade.profit > 0 ? "text-green-400" : "text-red-400")}>
-                      {trade.profit > 0 ? '+' : ''}{trade.profit}
-                    </span>
+                    <div className="p-3 bg-white/5 rounded-lg border border-white/5">
+                      <p className="text-[10px] text-gray-400 italic leading-relaxed">
+                        <span className="text-brand-secondary font-bold uppercase mr-2">AI Post-Analysis:</span>
+                        {trade.aiInsight || "Analyzing trade performance..."}
+                      </p>
+                    </div>
                   </div>
-                  <div className="p-3 bg-white/5 rounded-lg border border-white/5">
-                    <p className="text-[10px] text-gray-400 italic leading-relaxed">
-                      <span className="text-brand-secondary font-bold uppercase mr-2">AI Post-Analysis:</span>
-                      {trade.aiInsight || "Analyzing trade performance..."}
-                    </p>
+                ))}
+                {journal.length === 0 && (
+                  <div className="py-20 text-center text-gray-500 italic">
+                    No trades recorded yet. Start surfing to build your journal.
                   </div>
-                </div>
-              ))}
-              {journal.length === 0 && (
-                <div className="py-20 text-center text-gray-500 italic">
-                  No trades recorded yet. Start surfing to build your journal.
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -453,6 +559,67 @@ export default function App() {
                 <p className="text-[10px] text-gray-400 leading-relaxed">
                   Monitoring global liquidity flows. No immediate crash detected, but volatility is spiking in JPY pairs.
                 </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'SETTINGS' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="glass-panel p-6">
+              <h3 className="font-display font-bold text-lg mb-6 flex items-center gap-2">
+                <Settings className="w-5 h-5 text-brand-primary" />
+                System Configuration
+              </h3>
+              <div className="space-y-6">
+                <div>
+                  <label className="text-[10px] text-gray-500 uppercase tracking-widest block mb-2">Active Strategy</label>
+                  <select 
+                    value={activeStrategy}
+                    onChange={(e) => setActiveStrategy(e.target.value)}
+                    className="w-full bg-brand-bg border border-brand-border text-sm p-3 rounded-xl outline-none focus:border-brand-primary transition-colors"
+                  >
+                    <option value="SMC">STRAT_SMC (Smart Money Concepts)</option>
+                    <option value="BREAKOUT">BREAKOUT_PRO (Momentum)</option>
+                    <option value="REVERSAL">REVERSAL_KING (Mean Reversion)</option>
+                  </select>
+                </div>
+                
+                <div className="p-4 bg-brand-primary/5 border border-brand-primary/20 rounded-xl">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-xs font-bold">Local AI Status</span>
+                    <span className={cn(
+                      "px-2 py-0.5 rounded text-[8px] font-bold",
+                      serverStatus?.ollamaConnected ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"
+                    )}>
+                      {serverStatus?.ollamaConnected ? 'ONLINE' : 'OFFLINE'}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-gray-400">
+                    Ollama is running on your local machine. Using model: {(import.meta as any).env?.VITE_OLLAMA_MODEL || 'hhao/qwen2.5-coder-tools:latest'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="glass-panel p-6">
+              <h3 className="font-display font-bold text-lg mb-6 flex items-center gap-2">
+                <Shield className="w-5 h-5 text-brand-secondary" />
+                Risk Management
+              </h3>
+              <div className="space-y-4">
+                <div className="flex justify-between items-center p-3 bg-brand-bg border border-brand-border rounded-xl">
+                  <span className="text-xs">Max Daily Drawdown</span>
+                  <span className="text-xs font-mono text-red-400">5.0%</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-brand-bg border border-brand-border rounded-xl">
+                  <span className="text-xs">Initial TP Multiplier</span>
+                  <span className="text-xs font-mono text-green-400">2.0x SL</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-brand-bg border border-brand-border rounded-xl">
+                  <span className="text-xs">Auto-Signal Generation</span>
+                  <span className="text-xs font-mono text-brand-primary">ENABLED</span>
+                </div>
               </div>
             </div>
           </div>

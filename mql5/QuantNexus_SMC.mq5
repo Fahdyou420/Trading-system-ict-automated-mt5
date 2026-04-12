@@ -175,7 +175,27 @@ void SendJournalEntry(string type, string symbol, string setup, double profit) {
 
 void CheckTradeClosures() {
    // Logic to detect closed trades and send to journal
-   // This is a simplified placeholder
+   // We'll check the history for the last closed trade
+   if(HistorySelect(TimeCurrent()-86400, TimeCurrent())) {
+      int total = HistoryDealsTotal();
+      for(int i=total-1; i>=0; i--) {
+         ulong ticket = HistoryDealGetTicket(i);
+         if(HistoryDealGetInteger(ticket, DEAL_ENTRY) == DEAL_ENTRY_OUT) {
+            long magic = HistoryDealGetInteger(ticket, DEAL_MAGIC);
+            // Only process if it's our EA's trade (optional, but good practice)
+            double profit = HistoryDealGetDouble(ticket, DEAL_PROFIT) + HistoryDealGetDouble(ticket, DEAL_COMMISSION) + HistoryDealGetDouble(ticket, DEAL_SWAP);
+            string symbol = HistoryDealGetString(ticket, DEAL_SYMBOL);
+            
+            // To prevent duplicate sends, we could store the last ticket ID
+            static ulong lastProcessedTicket = 0;
+            if(ticket > lastProcessedTicket) {
+               SendJournalEntry("EXIT", symbol, "SMC_EXIT", profit);
+               lastProcessedTicket = ticket;
+            }
+            break;
+         }
+      }
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -188,6 +208,31 @@ void SyncDataWithServer() {
    payload += "\"price\":" + DoubleToString(SymbolInfoDouble(_Symbol, SYMBOL_BID), _Digits) + ",";
    payload += "\"strategy\":\"" + EnumToString(InpStrategy) + "\",";
    payload += "\"events\":\"" + DetectMarketEvents() + "\",";
+   payload += "\"balance\":" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2) + ",";
+   payload += "\"equity\":" + DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2) + ",";
+   payload += "\"drawdown\":" + DoubleToString((1.0 - AccountInfoDouble(ACCOUNT_EQUITY)/AccountInfoDouble(ACCOUNT_BALANCE)) * 100.0, 2) + ",";
+   payload += "\"marginUsed\":" + DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN), 2) + ",";
+   payload += "\"freeMargin\":" + DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE), 2) + ",";
+   
+   // Add Open Positions
+   payload += "\"openPositions\":[";
+   bool firstPos = true;
+   for(int i=0; i<PositionsTotal(); i++) {
+      string posSymbol = PositionGetSymbol(i);
+      if(!firstPos) payload += ",";
+      payload += "{";
+      payload += "\"symbol\":\"" + posSymbol + "\",";
+      payload += "\"type\":\"" + (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? "BUY" : "SELL") + "\",";
+      payload += "\"volume\":" + DoubleToString(PositionGetDouble(POSITION_VOLUME), 2) + ",";
+      payload += "\"openPrice\":" + DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN), SymbolInfoInteger(posSymbol, SYMBOL_DIGITS)) + ",";
+      payload += "\"currentPrice\":" + DoubleToString(PositionGetDouble(POSITION_PRICE_CURRENT), SymbolInfoInteger(posSymbol, SYMBOL_DIGITS)) + ",";
+      payload += "\"profit\":" + DoubleToString(PositionGetDouble(POSITION_PROFIT), 2) + ",";
+      payload += "\"sl\":" + DoubleToString(PositionGetDouble(POSITION_SL), SymbolInfoInteger(posSymbol, SYMBOL_DIGITS)) + ",";
+      payload += "\"tp\":" + DoubleToString(PositionGetDouble(POSITION_TP), SymbolInfoInteger(posSymbol, SYMBOL_DIGITS)) + "";
+      payload += "}";
+      firstPos = false;
+   }
+   payload += "],";
    
    // Add Objects (FVG, OB, etc)
    payload += "\"objects\":[";
@@ -215,11 +260,6 @@ void SyncDataWithServer() {
    string headers;
    StringToCharArray(payload, post);
    int res = WebRequest("POST", url, "Content-Type: application/json\r\n", 500, post, result, headers);
-   
-   if(res == -1) {
-      // Check if WebRequest is allowed in MT5 settings
-      // Print("WebRequest error: ", GetLastError());
-   }
 }
 
 bool CheckTrendFollowing() {

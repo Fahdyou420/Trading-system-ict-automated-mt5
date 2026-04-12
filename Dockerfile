@@ -22,5 +22,5 @@ EXPOSE 3000
 # Set environment variables
 ENV NODE_ENV=production
 
-# Start the application
-CMD ["node", "server.ts"]
+# Start the application using tsx to handle TypeScript
+CMD ["npx", "tsx", "server.ts"]
