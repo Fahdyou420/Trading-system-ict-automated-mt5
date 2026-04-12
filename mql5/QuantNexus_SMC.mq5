@@ -203,6 +203,12 @@ void CheckTradeClosures() {
 //+------------------------------------------------------------------+
 void SyncDataWithServer() {
    string url = InpServerURL + "/api/mt5/sync";
+   
+   // Check if WebRequest is allowed for this URL
+   if(!TerminalInfoInteger(TERMINAL_COMMUNITY_CONNECTION)) {
+      // This is just a general check, the specific URL check is harder to do via code
+   }
+
    string payload = "{";
    payload += "\"symbol\":\"" + _Symbol + "\",";
    payload += "\"price\":" + DoubleToString(SymbolInfoDouble(_Symbol, SYMBOL_BID), _Digits) + ",";
@@ -218,19 +224,21 @@ void SyncDataWithServer() {
    payload += "\"openPositions\":[";
    bool firstPos = true;
    for(int i=0; i<PositionsTotal(); i++) {
-      string posSymbol = PositionGetSymbol(i);
-      if(!firstPos) payload += ",";
-      payload += "{";
-      payload += "\"symbol\":\"" + posSymbol + "\",";
-      payload += "\"type\":\"" + (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? "BUY" : "SELL") + "\",";
-      payload += "\"volume\":" + DoubleToString(PositionGetDouble(POSITION_VOLUME), 2) + ",";
-      payload += "\"openPrice\":" + DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN), SymbolInfoInteger(posSymbol, SYMBOL_DIGITS)) + ",";
-      payload += "\"currentPrice\":" + DoubleToString(PositionGetDouble(POSITION_PRICE_CURRENT), SymbolInfoInteger(posSymbol, SYMBOL_DIGITS)) + ",";
-      payload += "\"profit\":" + DoubleToString(PositionGetDouble(POSITION_PROFIT), 2) + ",";
-      payload += "\"sl\":" + DoubleToString(PositionGetDouble(POSITION_SL), SymbolInfoInteger(posSymbol, SYMBOL_DIGITS)) + ",";
-      payload += "\"tp\":" + DoubleToString(PositionGetDouble(POSITION_TP), SymbolInfoInteger(posSymbol, SYMBOL_DIGITS)) + "";
-      payload += "}";
-      firstPos = false;
+      if(PositionSelectByTicket(PositionGetTicket(i))) {
+         string posSymbol = PositionGetString(POSITION_SYMBOL);
+         if(!firstPos) payload += ",";
+         payload += "{";
+         payload += "\"symbol\":\"" + posSymbol + "\",";
+         payload += "\"type\":\"" + (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? "BUY" : "SELL") + "\",";
+         payload += "\"volume\":" + DoubleToString(PositionGetDouble(POSITION_VOLUME), 2) + ",";
+         payload += "\"openPrice\":" + DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN), (int)SymbolInfoInteger(posSymbol, SYMBOL_DIGITS)) + ",";
+         payload += "\"currentPrice\":" + DoubleToString(PositionGetDouble(POSITION_PRICE_CURRENT), (int)SymbolInfoInteger(posSymbol, SYMBOL_DIGITS)) + ",";
+         payload += "\"profit\":" + DoubleToString(PositionGetDouble(POSITION_PROFIT), 2) + ",";
+         payload += "\"sl\":" + DoubleToString(PositionGetDouble(POSITION_SL), (int)SymbolInfoInteger(posSymbol, SYMBOL_DIGITS)) + ",";
+         payload += "\"tp\":" + DoubleToString(PositionGetDouble(POSITION_TP), (int)SymbolInfoInteger(posSymbol, SYMBOL_DIGITS)) + "";
+         payload += "}";
+         firstPos = false;
+      }
    }
    payload += "],";
    
@@ -259,7 +267,24 @@ void SyncDataWithServer() {
    char post[], result[];
    string headers;
    StringToCharArray(payload, post);
+   
+   ResetLastError();
    int res = WebRequest("POST", url, "Content-Type: application/json\r\n", 500, post, result, headers);
+   
+   if(res == -1) {
+      int error = GetLastError();
+      if(error == 4014) {
+         Print("CRITICAL: WebRequest NOT allowed. Go to Tools -> Options -> Expert Advisors and add '", InpServerURL, "' to the list.");
+      } else {
+         Print("Sync Error: ", error, " URL: ", url);
+      }
+   } else if(res != 200) {
+      string response = CharArrayToString(result);
+      Print("Server Error (", res, "): ", response);
+   } else {
+      // Success
+      if(TimeCurrent() % 60 == 0) Print("Sync OK: ", _Symbol, " @ ", DoubleToString(SymbolInfoDouble(_Symbol, SYMBOL_BID), _Digits));
+   }
 }
 
 bool CheckTrendFollowing() {

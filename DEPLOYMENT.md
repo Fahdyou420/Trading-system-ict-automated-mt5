@@ -49,9 +49,11 @@ The dashboard will now be accessible at `http://localhost:3000`.
 3. Check **"Allow WebRequest for listed URL"** and add:
    - `http://localhost:3000`
    - `http://127.0.0.1:3000`
+   - **CRITICAL**: If you don't add these, the EA will fail to sync!
 4. Copy `mql5/QuantNexus_SMC.mq5` to your MT5 `MQL5/Experts` folder.
 5. Compile and attach the EA to any chart (e.g., XAUUSD or EURUSD).
 6. Set the `InpServerURL` input to `http://localhost:3000`.
+7. Check the **Experts** tab in MT5. You should see "Sync OK" every minute.
 
 ---
 
@@ -94,9 +96,10 @@ Since you have **n8n** running in Docker, you can create powerful workflows:
 ---
 
 ## 🛠️ Troubleshooting
-- **WebRequest Error 4060**: Ensure the URL is correctly added to MT5's "Allowed URLs" list.
-- **Docker Not Starting**: Ensure Docker Desktop is running and WSL2 is enabled.
-- **Mobile Connection Failed**: Check if your ISP blocks port 3000 or if your No-IP DUC is active.
+- **WebRequest Error 4014**: This means MT5 is blocking the request. Go to **Tools > Options > Expert Advisors** and ensure `http://localhost:3000` is in the list.
+- **Empty Dashboard**: If `http://localhost:3000/api/status` shows `lastRawSync: null`, the server hasn't received anything. Check the MT5 **Experts** tab for errors.
+- **Docker Networking**: If MT5 is on the host and QuantNexus is in Docker, `localhost:3000` should work. If not, try using your PC's local IP (e.g., `192.168.1.50:3000`).
+- **Rate Limiting**: If you have many charts open, the server might block requests. I've increased the limit to 100 req/sec, which should be plenty.
 
 ---
 *Happy Surfing! 🌊*

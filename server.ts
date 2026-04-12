@@ -13,7 +13,9 @@ let lastSyncTimestamp = 0;
 // Simple rate limiter
 const rateLimits: Record<string, number[]> = {};
 const RATE_LIMIT_WINDOW = 1000; // 1 second
-const MAX_REQUESTS = 10;
+const MAX_REQUESTS = 100; // Increased for multiple symbols
+
+let lastRawSyncBody: any = null;
 
 function isRateLimited(ip: string): boolean {
   const now = Date.now();
@@ -50,12 +52,23 @@ async function startServer() {
   // API Route for MT5 Data Sync
   app.post("/api/mt5/sync", (req, res) => {
     try {
+      lastRawSyncBody = {
+        timestamp: new Date().toISOString(),
+        ip: req.ip,
+        body: req.body
+      };
+
       if (isRateLimited(req.ip || "unknown")) {
+        console.warn(`[Sync Rejected] Rate limited: ${req.ip}`);
         return res.status(429).json({ error: "Too many requests" });
       }
 
       const { symbol, price, strategy, objects, events, balance, equity, drawdown, marginUsed, freeMargin, openPositions } = req.body;
-      if (!symbol) return res.status(400).json({ error: "Symbol required" });
+      
+      if (!symbol) {
+        console.warn("[Sync Rejected] Missing symbol in body:", req.body);
+        return res.status(400).json({ error: "Symbol required" });
+      }
 
       // Sanitize inputs
       const sanitizedSymbol = String(symbol).toUpperCase();
@@ -124,7 +137,8 @@ async function startServer() {
         ollamaConnected: !!process.env.OLLAMA_URL,
         openRouterConfigured: !!process.env.OPENROUTER_API_KEY,
         activeSymbols: Object.keys(chartStates),
-        lastSyncTime: lastSyncTimestamp
+        lastSyncTime: lastSyncTimestamp,
+        lastRawSync: lastRawSyncBody
       });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch status" });
