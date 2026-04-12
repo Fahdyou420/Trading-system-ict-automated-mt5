@@ -1,0 +1,5 @@
+{
+  "name": "QuantNexus MT5 Terminal",
+  "description": "A proprietary-grade algorithmic trading dashboard and Expert Advisor framework for MetaTrader 5, featuring SMC logic, multi-account synchronization, and institutional risk management.",
+  "requestFramePermissions": []
+}
