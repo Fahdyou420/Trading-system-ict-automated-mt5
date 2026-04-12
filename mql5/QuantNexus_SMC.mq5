@@ -226,6 +226,13 @@ void SyncDataWithServer() {
    ArraySetAsSeries(macdMain, true);
    ArraySetAsSeries(macdSig, true);
 
+   // Fetch Price Data for Swing Analysis
+   double High[], Low[];
+   ArraySetAsSeries(High, true);
+   ArraySetAsSeries(Low, true);
+   CopyHigh(_Symbol, _Period, 0, 105, High);
+   CopyLow(_Symbol, _Period, 0, 105, Low);
+
    // Find Swing Highs/Lows (Last 3)
    double swingHighs[3], swingLows[3];
    int shCount=0, slCount=0;
@@ -389,6 +396,14 @@ string GetJsonValue(string json, string key) {
 //+------------------------------------------------------------------+
 void DrawHistoricalStructure() {
    Print("Calculating Historical Market Structure...");
+
+   double High[];
+   datetime Time[];
+   ArraySetAsSeries(High, true);
+   ArraySetAsSeries(Time, true);
+   CopyHigh(_Symbol, _Period, 0, 505, High);
+   CopyTime(_Symbol, _Period, 0, 505, Time);
+
    // Logic to draw last 5 BOS/CHoCH lines
    for(int i=5; i<500; i++) {
       if(High[i] > High[i-1] && High[i] > High[i+1] && High[i] > High[i-2] && High[i] > High[i+2]) {
