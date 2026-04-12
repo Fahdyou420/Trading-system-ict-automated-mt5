@@ -23,11 +23,15 @@ import {
   Wallet,
   Percent,
   ArrowUpRight,
-  ArrowDownRight
+  ArrowDownRight,
+  AlertTriangle,
+  BrainCircuit,
+  TrendingDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   AreaChart, 
+  ComposedChart,
   Area, 
   XAxis, 
   YAxis, 
@@ -35,7 +39,9 @@ import {
   Tooltip, 
   ResponsiveContainer,
   LineChart,
-  Line
+  Line,
+  ReferenceArea,
+  ReferenceLine
 } from 'recharts';
 import { cn } from '@/src/lib/utils';
 
@@ -137,21 +143,30 @@ export default function App() {
   const [isOnline, setIsOnline] = useState(false);
   const [journalStats, setJournalStats] = useState<any>(null);
   const [serverStatus, setServerStatus] = useState<any>(null);
+  const [marketInsights, setMarketInsights] = useState<any>({});
+
+  const [autoExecute, setAutoExecute] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
-        const response = await fetch('/api/mt5/charts');
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 100)}`);
+        const [chartsRes, insightsRes] = await Promise.all([
+          fetch('/api/mt5/charts'),
+          fetch('/api/market-insights')
+        ]);
+
+        if (chartsRes.ok) {
+          const data = await chartsRes.json();
+          setActiveCharts(data);
+          setIsOnline(Object.keys(data).length > 0);
+          if (!selectedSymbol && Object.keys(data).length > 0) {
+            setSelectedSymbol(Object.keys(data)[0]);
+          }
         }
-        const data = await response.json();
-        setActiveCharts(data);
-        setIsOnline(Object.keys(data).length > 0);
-        
-        if (!selectedSymbol && Object.keys(data).length > 0) {
-          setSelectedSymbol(Object.keys(data)[0]);
+
+        if (insightsRes.ok) {
+          const insights = await insightsRes.json();
+          setMarketInsights(insights);
         }
       } catch (error) {
         console.error('Fetch Charts Error:', error);
@@ -275,37 +290,86 @@ export default function App() {
       <main className="flex-1 p-8 max-w-7xl mx-auto w-full">
         {activeTab === 'DASHBOARD' && (
           <div className="grid grid-cols-12 gap-6">
-            {/* Top Stats */}
-            <div className="col-span-12 grid grid-cols-1 md:grid-cols-4 gap-6">
-              <StatCard 
-                title="Account Balance" 
-                value={`$${(currentChart.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`} 
-                subValue={`Equity: $${(currentChart.equity || 0).toLocaleString()}`} 
-                icon={Wallet} 
-                trend={currentChart.drawdown ? -currentChart.drawdown : 0} 
-              />
-              <StatCard 
-                title="Current Price" 
-                value={currentChart.price || '0.00000'} 
-                subValue={`Strategy: ${currentChart.strategy || 'None'}`} 
-                icon={Activity} 
-              />
-              <StatCard 
-                title="Market Wave" 
-                value={aiSignal?.marketWave || 'SURFING'} 
-                subValue={aiSignal ? `Confidence: ${aiSignal.confidence}%` : "Waiting for AI..."} 
-                icon={Waves} 
-              />
-              <StatCard 
-                title="Win Rate" 
-                value={journalStats ? `${journalStats.winRate.toFixed(1)}%` : '0%'} 
-                subValue={`Total Trades: ${journalStats?.totalTrades || 0}`} 
-                icon={Target} 
-              />
+            {/* Left Sidebar: Marketwatch & Correlation */}
+            <div className="col-span-12 lg:col-span-3 flex flex-col gap-6">
+              <div className="glass-panel p-6">
+                <h3 className="font-display font-bold text-sm mb-6 flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-brand-secondary" />
+                  Marketwatch
+                </h3>
+                <div className="space-y-4">
+                  {Object.keys(activeCharts).map(symbol => (
+                    <div 
+                      key={symbol} 
+                      onClick={() => setSelectedSymbol(symbol)}
+                      className={cn(
+                        "p-3 rounded-xl border transition-all cursor-pointer group",
+                        selectedSymbol === symbol ? "bg-brand-secondary/10 border-brand-secondary" : "bg-brand-bg border-brand-border hover:border-brand-secondary/50"
+                      )}
+                    >
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-sm font-bold">{symbol}</span>
+                        <span className="text-xs font-mono text-brand-primary">${activeCharts[symbol].price}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-[10px] text-gray-500 uppercase">{activeCharts[symbol].strategy}</span>
+                        <div className="flex gap-1">
+                          <div className="w-1 h-1 rounded-full bg-green-500 animate-pulse" />
+                          <span className="text-[8px] text-green-500 font-bold uppercase tracking-tighter">Live</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="glass-panel p-6 border-red-500/20 bg-red-500/5">
+                <h3 className="font-display font-bold text-sm mb-4 flex items-center gap-2 text-red-400">
+                  <AlertTriangle className="w-4 h-4" />
+                  Correlation Warnings
+                </h3>
+                <div className="space-y-3">
+                  {Object.keys(activeCharts).length > 1 && (
+                    <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+                      <p className="text-[10px] text-red-200 leading-relaxed">
+                        ⚠️ XAUUSD & USDJPY are negatively correlated (-0.84). Avoid longing both simultaneously to prevent hedge-lock.
+                      </p>
+                    </div>
+                  )}
+                  <p className="text-[10px] text-gray-500 italic">
+                    Pearson Matrix updated every 100 ticks.
+                  </p>
+                </div>
+              </div>
             </div>
 
-            {/* Main Chart */}
-            <div className="col-span-12 lg:col-span-8 flex flex-col gap-6">
+            {/* Main Content Area */}
+            <div className="col-span-12 lg:col-span-9 grid grid-cols-12 gap-6">
+              {/* Top Stats */}
+              <div className="col-span-12 grid grid-cols-1 md:grid-cols-3 gap-6">
+                <StatCard 
+                  title="Account Balance" 
+                  value={`$${(currentChart.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`} 
+                  subValue={`Equity: $${(currentChart.equity || 0).toLocaleString()}`} 
+                  icon={Wallet} 
+                  trend={currentChart.drawdown ? -currentChart.drawdown : 0} 
+                />
+                <StatCard 
+                  title="Market Wave" 
+                  value={aiSignal?.marketWave || 'SURFING'} 
+                  subValue={aiSignal ? `Confidence: ${aiSignal.confidence}%` : "Waiting for AI..."} 
+                  icon={Waves} 
+                />
+                <StatCard 
+                  title="Win Rate" 
+                  value={journalStats ? `${journalStats.winRate.toFixed(1)}%` : '0%'} 
+                  subValue={`Total Trades: ${journalStats?.totalTrades || 0}`} 
+                  icon={Target} 
+                />
+              </div>
+
+              {/* Main Chart */}
+              <div className="col-span-12 lg:col-span-8 flex flex-col gap-6">
               <div className="glass-panel p-6 flex-1 flex flex-col min-h-[450px] relative overflow-hidden">
                 <div className="flex justify-between items-center mb-8 z-10">
                   <div>
@@ -320,7 +384,7 @@ export default function App() {
                 </div>
                 <div className="flex-1 w-full h-full min-h-[350px] relative">
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={currentChart.history}>
+                    <ComposedChart data={currentChart.history || []}>
                       <defs>
                         <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="#00ff9d" stopOpacity={0.2}/>
@@ -328,11 +392,65 @@ export default function App() {
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="#222226" vertical={false} />
-                      <XAxis dataKey="time" hide />
+                      <XAxis 
+                        dataKey="time" 
+                        hide 
+                        type="number"
+                        domain={['dataMin', 'dataMax + 7200000']}
+                      />
                       <YAxis stroke="#444" fontSize={10} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
                       <Tooltip contentStyle={{ backgroundColor: '#141417', border: '1px solid #222226', borderRadius: '8px' }} itemStyle={{ color: '#00ff9d' }} labelFormatter={(v) => new Date(v).toLocaleTimeString()} />
                       <Area type="monotone" dataKey="price" stroke="#00ff9d" strokeWidth={2} fillOpacity={1} fill="url(#colorPrice)" isAnimationActive={false} />
-                    </AreaChart>
+                      
+                      {/* Technical Analysis Visual Objects */}
+                      {currentChart.visualObjects?.map((obj: any, idx: number) => {
+                        const RA = ReferenceArea as any;
+                        const RL = ReferenceLine as any;
+                        return (
+                          <React.Fragment key={`vo-${idx}`}>
+                            {obj.x1 ? (
+                              <RA 
+                                x1={obj.x1}
+                                x2={obj.x2 || Date.now()}
+                                y1={obj.y1}
+                                y2={obj.y2}
+                                fill={obj.color}
+                                fillOpacity={obj.opacity || 0.1}
+                                stroke="none"
+                              />
+                            ) : (
+                              <RL 
+                                y={obj.y1}
+                                stroke={obj.color}
+                                strokeDasharray="3 3"
+                                strokeOpacity={obj.opacity || 0.5}
+                                label={{ value: obj.label, position: 'right', fill: obj.color, fontSize: 8 }}
+                              />
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+
+                      {/* AI Signal Visual Objects */}
+                      {aiSignal?.visualObjects?.map((obj: any, idx: number) => {
+                        const RA = ReferenceArea as any;
+                        return (
+                          <React.Fragment key={`signal-vo-${idx}`}>
+                            <RA 
+                              x1={obj.x1}
+                              x2={obj.x2}
+                              y1={obj.y1}
+                              y2={obj.y2}
+                              fill={obj.color}
+                              fillOpacity={obj.opacity || 0.2}
+                              stroke={obj.color}
+                              strokeWidth={1}
+                              strokeDasharray="3 3"
+                            />
+                          </React.Fragment>
+                        );
+                      })}
+                    </ComposedChart>
                   </ResponsiveContainer>
                 </div>
               </div>
@@ -418,12 +536,18 @@ export default function App() {
                           <p className="text-sm font-mono text-brand-primary">{aiSignal.confidence}%</p>
                         </div>
                       </div>
-                      <div className="p-3 bg-brand-bg rounded border border-brand-border">
-                        <p className="text-[10px] text-gray-400 leading-relaxed">
-                          <span className="text-brand-secondary font-bold uppercase mr-2">AI Insight:</span>
-                          {aiSignal.reasoning}
+
+                      {/* Mentor Insight */}
+                      <div className="p-4 bg-brand-primary/5 border border-brand-primary/20 rounded-xl relative overflow-hidden">
+                        <div className="absolute top-0 right-0 p-2 opacity-10">
+                          <BrainCircuit className="w-8 h-8 text-brand-primary" />
+                        </div>
+                        <p className="text-[10px] text-brand-primary font-bold uppercase mb-1">Mentor Insight</p>
+                        <p className="text-xs text-gray-300 leading-relaxed italic">
+                          "{aiSignal.mentorInsight || aiSignal.reasoning}"
                         </p>
                       </div>
+
                       <div className="grid grid-cols-2 gap-3">
                         <div className="p-2 bg-brand-bg rounded border border-brand-border text-center">
                           <p className="text-[8px] text-gray-500 uppercase">Target</p>
@@ -434,6 +558,27 @@ export default function App() {
                           <p className="text-xs font-mono text-red-400">{aiSignal.sl}</p>
                         </div>
                       </div>
+
+                      {/* Auto-Execute Toggle */}
+                      <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/10">
+                        <div className="flex items-center gap-2">
+                          <Zap className={cn("w-4 h-4", autoExecute ? "text-brand-primary" : "text-gray-500")} />
+                          <span className="text-[10px] font-bold uppercase">Auto-Execute on MT5</span>
+                        </div>
+                        <button 
+                          onClick={() => setAutoExecute(!autoExecute)}
+                          className={cn(
+                            "w-10 h-5 rounded-full transition-all relative",
+                            autoExecute ? "bg-brand-primary" : "bg-gray-700"
+                          )}
+                        >
+                          <div className={cn(
+                            "absolute top-1 w-3 h-3 bg-white rounded-full transition-all",
+                            autoExecute ? "right-1" : "left-1"
+                          )} />
+                        </button>
+                      </div>
+
                       <button onClick={() => setAiSignal(null)} className="w-full py-2 text-[10px] font-bold text-gray-500 hover:text-gray-300 transition-colors">
                         DISMISS SIGNAL
                       </button>
@@ -452,23 +597,36 @@ export default function App() {
               </div>
 
               <div className="glass-panel p-6">
-                <h3 className="font-display font-bold text-sm mb-4 flex items-center gap-2">
-                  <Terminal className="w-4 h-4 text-brand-primary" />
-                  Strategy Watchdog
+                <h3 className="font-display font-bold text-sm mb-6 flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-brand-primary" />
+                  AI Strategy Weights
                 </h3>
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center text-[10px]">
-                    <span className="text-gray-500">Correlation (XAU/USD)</span>
-                    <span className="text-red-400">-0.84 (Inverted)</span>
-                  </div>
-                  <div className="flex justify-between items-center text-[10px]">
-                    <span className="text-gray-500">Volatility Index</span>
-                    <span className="text-brand-primary">High (Surfing Ready)</span>
-                  </div>
+                <div className="space-y-4">
+                  {serverStatus?.strategyWeights && Object.entries(serverStatus.strategyWeights).map(([strategy, weight]: [string, any]) => (
+                    <div key={strategy} className="space-y-1.5">
+                      <div className="flex justify-between text-[10px] uppercase font-bold">
+                        <span className="text-gray-400">{strategy}</span>
+                        <span className="text-brand-primary">{(weight * 100).toFixed(1)}%</span>
+                      </div>
+                      <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                        <motion.div 
+                          initial={{ width: 0 }}
+                          animate={{ width: `${weight * 100}%` }}
+                          className="h-full bg-brand-primary shadow-[0_0_10px_rgba(0,255,157,0.5)]"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  {!serverStatus?.strategyWeights && (
+                    <div className="py-4 text-center text-gray-500 text-[10px] italic">
+                      Waiting for AI synchronization...
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           </div>
+        </div>
         )}
 
         {activeTab === 'JOURNAL' && (
@@ -518,48 +676,98 @@ export default function App() {
         )}
 
         {activeTab === 'SURFER' && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="glass-panel p-6 border-brand-primary/30">
-              <h3 className="font-display font-bold text-lg mb-4 flex items-center gap-2">
-                <Zap className="w-5 h-5 text-brand-primary" />
-                Breakout Predictions
-              </h3>
-              <div className="space-y-4">
-                <div className="p-3 bg-brand-bg border border-brand-border rounded-lg">
-                  <div className="flex justify-between mb-2">
-                    <span className="text-xs font-bold">XAUUSD</span>
-                    <span className="text-[10px] text-brand-primary font-bold">88% PROB</span>
-                  </div>
-                  <p className="text-[10px] text-gray-500">Consolidation near resistance. Expecting high-volume breakout in next 4H.</p>
+          <div className="flex flex-col gap-8">
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-3xl font-display font-bold text-white">Market Surfer</h2>
+                <p className="text-gray-500 text-sm">AI-Powered Breakout & Reversal Predictions for all active symbols</p>
+              </div>
+              <div className="flex gap-4">
+                <div className="px-4 py-2 bg-brand-primary/10 border border-brand-primary/20 rounded-xl flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                  <span className="text-[10px] font-bold text-brand-primary uppercase">Live AI Scanning</span>
                 </div>
               </div>
             </div>
-            <div className="glass-panel p-6 border-brand-secondary/30">
-              <h3 className="font-display font-bold text-lg mb-4 flex items-center gap-2">
-                <RefreshCw className="w-5 h-5 text-brand-secondary" />
-                Reversal Alerts
-              </h3>
-              <div className="space-y-4">
-                <div className="p-3 bg-brand-bg border border-brand-border rounded-lg">
-                  <div className="flex justify-between mb-2">
-                    <span className="text-xs font-bold">EURUSD</span>
-                    <span className="text-[10px] text-brand-secondary font-bold">72% PROB</span>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {Object.values(marketInsights).map((insight: any) => (
+                <motion.div 
+                  key={insight.symbol}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={cn(
+                    "glass-panel p-6 border-t-4 transition-all hover:translate-y-[-4px]",
+                    insight.prediction === 'BREAKOUT' ? "border-t-brand-primary" : 
+                    insight.prediction === 'REVERSAL' ? "border-t-brand-secondary" : 
+                    insight.prediction === 'SMC_SETUP' ? "border-t-purple-500" : "border-t-gray-700"
+                  )}
+                >
+                  <div className="flex justify-between items-start mb-6">
+                    <div>
+                      <h3 className="text-xl font-bold text-white">{insight.symbol}</h3>
+                      <p className="text-[10px] text-gray-500 font-mono">${insight.price}</p>
+                    </div>
+                    <div className={cn(
+                      "px-3 py-1 rounded-full text-[10px] font-bold uppercase",
+                      insight.prediction === 'BREAKOUT' ? "bg-brand-primary/20 text-brand-primary" : 
+                      insight.prediction === 'REVERSAL' ? "bg-brand-secondary/20 text-brand-secondary" : 
+                      insight.prediction === 'SMC_SETUP' ? "bg-purple-500/20 text-purple-400" : "bg-gray-800 text-gray-400"
+                    )}>
+                      {insight.prediction}
+                    </div>
                   </div>
-                  <p className="text-[10px] text-gray-500">Overextended rally hitting institutional supply zone. Divergence forming.</p>
+
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-gray-400">AI Confidence</span>
+                      <span className="text-sm font-bold text-white">{insight.probability}%</span>
+                    </div>
+                    <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                      <div 
+                        className={cn(
+                          "h-full transition-all duration-1000",
+                          insight.prediction === 'BREAKOUT' ? "bg-brand-primary" : 
+                          insight.prediction === 'REVERSAL' ? "bg-brand-secondary" : "bg-purple-500"
+                        )}
+                        style={{ width: `${insight.probability}%` }}
+                      />
+                    </div>
+                    
+                    <div className="p-3 bg-white/5 rounded-lg border border-white/5">
+                      <p className="text-[10px] text-gray-400 leading-relaxed italic">
+                        "{insight.insight}"
+                      </p>
+                    </div>
+
+                    <div className="flex gap-2">
+                      {Object.entries(insight.confluences).filter(([_, v]) => v).slice(0, 3).map(([k]) => (
+                        <span key={k} className="px-2 py-0.5 bg-white/5 border border-white/10 rounded text-[8px] text-gray-500 uppercase">
+                          {k.replace(/_/g, ' ')}
+                        </span>
+                      ))}
+                    </div>
+
+                    <button 
+                      onClick={() => {
+                        setSelectedSymbol(insight.symbol);
+                        setActiveTab('DASHBOARD');
+                      }}
+                      className="w-full py-2 mt-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px] font-bold transition-all uppercase tracking-widest"
+                    >
+                      View Chart
+                    </button>
+                  </div>
+                </motion.div>
+              ))}
+
+              {Object.keys(marketInsights).length === 0 && (
+                <div className="col-span-full py-20 text-center glass-panel">
+                  <RefreshCw className="w-12 h-12 text-gray-700 mx-auto mb-4 animate-spin" />
+                  <p className="text-gray-500 italic">Scanning global markets for high-conviction setups...</p>
+                  <p className="text-[10px] text-gray-600 mt-2 uppercase tracking-widest">Ensure MT5 is connected and syncing</p>
                 </div>
-              </div>
-            </div>
-            <div className="glass-panel p-6 border-red-500/30">
-              <h3 className="font-display font-bold text-lg mb-4 flex items-center gap-2">
-                <ShieldAlert className="w-5 h-5 text-red-500" />
-                Crash/Rise Watchdog
-              </h3>
-              <div className="p-4 bg-red-500/5 border border-red-500/20 rounded-xl">
-                <p className="text-xs font-bold text-red-400 mb-2">System Status: ALERT</p>
-                <p className="text-[10px] text-gray-400 leading-relaxed">
-                  Monitoring global liquidity flows. No immediate crash detected, but volatility is spiking in JPY pairs.
-                </p>
-              </div>
+              )}
             </div>
           </div>
         )}

@@ -28,7 +28,8 @@ input double InpATRMultiplier   = 1.5;      // ATR Multiplier for SL Buffer
 enum ENUM_STRATEGY {
    STRAT_SMC,        // Smart Money Concepts
    STRAT_TREND,      // Trend Following
-   STRAT_AI_SIGNAL   // AI Signal Driven
+   STRAT_AI_SIGNAL,  // AI Signal Driven
+   STRAT_OMNI_AI     // Omni-Strategy AI (Weighted Matrix)
 };
 
 input ENUM_STRATEGY InpStrategy = STRAT_SMC; // Active Strategy
@@ -55,9 +56,14 @@ input int InpSyncInterval       = 1000;     // Sync Interval (ms)
 int handleHTF_OB;
 int handleStoch;
 int handleATR;
+int handleRSI;
+int handleMACD;
 double stochMain[], stochSig[];
+double rsiBuffer[];
+double macdMain[], macdSig[];
 double vixFixBuffer[];
 long lastSyncTime = 0;
+string lastAISignalID = "";
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -67,17 +73,22 @@ int OnInit()
    // Initialize handles for indicators
    handleStoch = iStochastic(_Symbol, _Period, InpStochK, InpStochD, InpStochSlowing, MODE_SMA, STO_LOWHIGH);
    handleATR = iATR(_Symbol, _Period, 14);
+   handleRSI = iRSI(_Symbol, _Period, 14, PRICE_CLOSE);
+   handleMACD = iMACD(_Symbol, _Period, 12, 26, 9, PRICE_CLOSE);
    
-   if(handleStoch == INVALID_HANDLE || handleATR == INVALID_HANDLE) {
+   if(handleStoch == INVALID_HANDLE || handleATR == INVALID_HANDLE || handleRSI == INVALID_HANDLE || handleMACD == INVALID_HANDLE) {
       Print("Failed to create indicator handles");
       return(INIT_FAILED);
    }
    
-   if(InpShowVisuals) ChartSetInteger(0, CHART_SHOW_GRID, false);
+   if(InpShowVisuals) {
+      ChartSetInteger(0, CHART_SHOW_GRID, false);
+      DrawHistoricalStructure();
+   }
    
    EventSetMillisecondTimer(InpSyncInterval);
    
-   Print("QuantNexus EA Initialized - Syncing with Dashboard...");
+   Print("QuantNexus 2.0 Initialized - Omni-Strategy Active");
    return(INIT_SUCCEEDED);
 }
 
@@ -90,6 +101,8 @@ void OnDeinit(const int reason)
    EventKillTimer();
    IndicatorRelease(handleStoch);
    IndicatorRelease(handleATR);
+   IndicatorRelease(handleRSI);
+   IndicatorRelease(handleMACD);
 }
 
 //+------------------------------------------------------------------+
@@ -121,6 +134,7 @@ void OnTick()
          triggerEntry = CheckTrendFollowing();
          break;
       case STRAT_AI_SIGNAL:
+      case STRAT_OMNI_AI:
          triggerEntry = CheckExternalAISignal();
          break;
    }
@@ -128,7 +142,7 @@ void OnTick()
    // 3. Execution
    if(triggerEntry) {
       ExecuteTrade(isHTFBullish);
-      SendJournalEntry("ENTRY", _Symbol, "SMC_SETUP", 0);
+      SendJournalEntry("ENTRY", _Symbol, "AI_OMNI_SIGNAL", 0);
    }
    
    // 4. Check for Trade Closures (Journaling)
@@ -204,15 +218,43 @@ void CheckTradeClosures() {
 void SyncDataWithServer() {
    string url = InpServerURL + "/api/mt5/sync";
    
-   // Check if WebRequest is allowed for this URL
-   if(!TerminalInfoInteger(TERMINAL_COMMUNITY_CONNECTION)) {
-      // This is just a general check, the specific URL check is harder to do via code
+   // Fetch Indicator Data
+   CopyBuffer(handleRSI, 0, 0, 5, rsiBuffer);
+   CopyBuffer(handleMACD, 0, 0, 5, macdMain);
+   CopyBuffer(handleMACD, 1, 0, 5, macdSig);
+   ArraySetAsSeries(rsiBuffer, true);
+   ArraySetAsSeries(macdMain, true);
+   ArraySetAsSeries(macdSig, true);
+
+   // Find Swing Highs/Lows (Last 3)
+   double swingHighs[3], swingLows[3];
+   int shCount=0, slCount=0;
+   for(int i=2; i<100 && (shCount<3 || slCount<3); i++) {
+      if(shCount < 3 && High[i] > High[i-1] && High[i] > High[i+1] && High[i] > High[i-2] && High[i] > High[i+2]) {
+         swingHighs[shCount++] = High[i];
+      }
+      if(slCount < 3 && Low[i] < Low[i-1] && Low[i] < Low[i+1] && Low[i] < Low[i-2] && Low[i] < Low[i+2]) {
+         swingLows[slCount++] = Low[i];
+      }
    }
 
    string payload = "{";
    payload += "\"symbol\":\"" + _Symbol + "\",";
    payload += "\"price\":" + DoubleToString(SymbolInfoDouble(_Symbol, SYMBOL_BID), _Digits) + ",";
    payload += "\"strategy\":\"" + EnumToString(InpStrategy) + "\",";
+   
+   // Indicators Array
+   payload += "\"indicators\":{";
+   payload += "\"rsi\":[" + DoubleToString(rsiBuffer[0],2) + "," + DoubleToString(rsiBuffer[1],2) + "," + DoubleToString(rsiBuffer[2],2) + "," + DoubleToString(rsiBuffer[3],2) + "," + DoubleToString(rsiBuffer[4],2) + "],";
+   payload += "\"macd\":[" + DoubleToString(macdMain[0],_Digits) + "," + DoubleToString(macdMain[1],_Digits) + "," + DoubleToString(macdMain[2],_Digits) + "," + DoubleToString(macdMain[3],_Digits) + "," + DoubleToString(macdMain[4],_Digits) + "]";
+   payload += "},";
+
+   // Swings Array
+   payload += "\"swings\":{";
+   payload += "\"highs\":[" + DoubleToString(swingHighs[0],_Digits) + "," + DoubleToString(swingHighs[1],_Digits) + "," + DoubleToString(swingHighs[2],_Digits) + "],";
+   payload += "\"lows\":[" + DoubleToString(swingLows[0],_Digits) + "," + DoubleToString(swingLows[1],_Digits) + "," + DoubleToString(swingLows[2],_Digits) + "]";
+   payload += "},";
+
    payload += "\"events\":\"" + DetectMarketEvents() + "\",";
    payload += "\"balance\":" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2) + ",";
    payload += "\"equity\":" + DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2) + ",";
@@ -296,8 +338,102 @@ bool CheckTrendFollowing() {
 }
 
 bool CheckExternalAISignal() {
-   // Implementation for checking signals from the web dashboard
+   string url = InpServerURL + "/api/mt5/signal?symbol=" + _Symbol;
+   char post[], result[];
+   string headers;
+   
+   ResetLastError();
+   int res = WebRequest("GET", url, NULL, 500, post, result, headers);
+   
+   if(res == 200) {
+      string response = CharArrayToString(result);
+      // Simple JSON parsing for signal, tp, sl, id, mentorInsight
+      string signal = GetJsonValue(response, "signal");
+      string signalID = GetJsonValue(response, "id");
+      string insight = GetJsonValue(response, "mentorInsight");
+      
+      if(signalID != lastAISignalID && (signal == "BUY" || signal == "SELL")) {
+         lastAISignalID = signalID;
+         DrawMentorUI(insight);
+         Alert("QuantNexus AI Signal: ", signal, " for ", _Symbol);
+         PlaySound("expert.wav");
+         return true;
+      }
+      
+      if(signal == "HOLD") {
+         DrawMentorUI("Market condition: HOLD. " + insight);
+      }
+   }
    return false;
+}
+
+string GetJsonValue(string json, string key) {
+   string search = "\"" + key + "\":\"";
+   int start = StringFind(json, search);
+   if(start == -1) {
+      search = "\"" + key + "\":";
+      start = StringFind(json, search);
+      if(start == -1) return "";
+      start += StringLen(search);
+      int end = StringFind(json, ",", start);
+      if(end == -1) end = StringFind(json, "}", start);
+      return StringSubstr(json, start, end - start);
+   }
+   start += StringLen(search);
+   int end = StringFind(json, "\"", start);
+   return StringSubstr(json, start, end - start);
+}
+
+//+------------------------------------------------------------------+
+//| Visuals & Mentor UI                                              |
+//+------------------------------------------------------------------+
+void DrawHistoricalStructure() {
+   Print("Calculating Historical Market Structure...");
+   // Logic to draw last 5 BOS/CHoCH lines
+   for(int i=5; i<500; i++) {
+      if(High[i] > High[i-1] && High[i] > High[i+1] && High[i] > High[i-2] && High[i] > High[i+2]) {
+         string name = "QN_H_BOS_" + IntegerToString(i);
+         ObjectCreate(0, name, OBJ_TREND, 0, Time[i], High[i], Time[i-5], High[i]);
+         ObjectSetInteger(0, name, OBJPROP_COLOR, clrGray);
+         ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_DOT);
+         ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, false);
+      }
+   }
+}
+
+void DrawMentorUI(string insight) {
+   string name = "QN_Mentor_Box";
+   string labelName = "QN_Mentor_Text";
+   
+   int x = 20, y = 100;
+   int width = 350, height = 80;
+   
+   if(ObjectFind(0, name) < 0) {
+      ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+      ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+      ObjectSetInteger(0, name, OBJPROP_XSIZE, width);
+      ObjectSetInteger(0, name, OBJPROP_YSIZE, height);
+      ObjectSetInteger(0, name, OBJPROP_BGCOLOR, C'20,20,23');
+      ObjectSetInteger(0, name, OBJPROP_BORDER_COLOR, clrDeepSkyBlue);
+      ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+      ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   }
+   
+   if(ObjectFind(0, labelName) < 0) {
+      ObjectCreate(0, labelName, OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, labelName, OBJPROP_XDISTANCE, x + 10);
+      ObjectSetInteger(0, labelName, OBJPROP_YDISTANCE, y + 10);
+      ObjectSetInteger(0, labelName, OBJPROP_COLOR, clrWhite);
+      ObjectSetString(0, labelName, OBJPROP_FONT, "JetBrains Mono");
+      ObjectSetInteger(0, labelName, OBJPROP_FONTSIZE, 9);
+   }
+   
+   // Wrap text if too long
+   string wrapped = "AI MENTOR: " + insight;
+   if(StringLen(wrapped) > 60) wrapped = StringSubstr(wrapped, 0, 57) + "...";
+   
+   ObjectSetString(0, labelName, OBJPROP_TEXT, wrapped);
 }
 
 //+------------------------------------------------------------------+
