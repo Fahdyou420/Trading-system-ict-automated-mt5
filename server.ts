@@ -30,7 +30,20 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  // Custom JSON parsing error handler to catch malformed MT5 payloads
+  app.use((req, res, next) => {
+    express.json()(req, res, (err) => {
+      if (err) {
+        console.error(`[JSON Parse Error] from ${req.ip}:`, err.message);
+        return res.status(400).json({ 
+          error: "Malformed JSON body", 
+          details: err.message,
+          hint: "MetaTrader 5 might be sending a trailing null terminator. Please update your EA." 
+        });
+      }
+      next();
+    });
+  });
 
   // CORS Configuration
   app.use((req, res, next) => {

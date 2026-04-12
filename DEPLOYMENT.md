@@ -97,9 +97,10 @@ Since you have **n8n** running in Docker, you can create powerful workflows:
 
 ## 🛠️ Troubleshooting
 - **WebRequest Error 4014**: This means MT5 is blocking the request. Go to **Tools > Options > Expert Advisors** and ensure `http://localhost:3000` is in the list.
+- **Server Error (400) / Bad Request**: This usually happens if the EA sends a malformed JSON body (often due to a trailing null terminator). 
+  - **Fix**: Ensure you are using the latest `QuantNexus_SMC.mq5` which handles string-to-char conversion correctly.
+  - **Check**: Look at the Docker logs (`docker logs -f quantnexus`). If you see `[JSON Parse Error]`, the EA needs to be re-compiled.
 - **Empty Dashboard**: If `http://localhost:3000/api/status` shows `lastRawSync: null`, the server hasn't received anything. Check the MT5 **Experts** tab for errors.
-- **Docker Networking**: If MT5 is on the host and QuantNexus is in Docker, `localhost:3000` should work. If not, try using your PC's local IP (e.g., `192.168.1.50:3000`).
-- **Rate Limiting**: If you have many charts open, the server might block requests. I've increased the limit to 100 req/sec, which should be plenty.
 
 ---
 *Happy Surfing! 🌊*

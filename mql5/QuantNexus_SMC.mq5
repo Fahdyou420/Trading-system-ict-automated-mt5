@@ -266,7 +266,10 @@ void SyncDataWithServer() {
 
    char post[], result[];
    string headers;
-   StringToCharArray(payload, post);
+   // Convert string to char array WITHOUT the null terminator to avoid "Unexpected non-whitespace character" error on server
+   int len = StringLen(payload);
+   ArrayResize(post, len);
+   StringToCharArray(payload, post, 0, len);
    
    ResetLastError();
    int res = WebRequest("POST", url, "Content-Type: application/json\r\n", 500, post, result, headers);
