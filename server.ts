@@ -27,8 +27,9 @@ let adminConfig = {
   },
   strategy: {
     minConfidence: 75,
-    autoExecute: false,
-    maxDrawdown: 5.0
+    autoExecute: true,
+    maxDrawdown: 5.0,
+    tradeFrequency: "HIGH" // "HIGH" (Scalping), "MEDIUM" (Day), "LOW" (Swing)
   },
   indicators: {
     rsiPeriod: 14,
@@ -312,12 +313,17 @@ async function runAutonomousCycle() {
     const confluences = evaluateStrategies(chartData);
     const activeCount = Object.values(confluences).filter(v => v).length;
 
-    if (activeCount >= 3) {
+    // Adjust required confluences based on trade frequency (Scalping = 2, Day = 3, Swing = 4)
+    let requiredConfluences = 3;
+    if (adminConfig.strategy.tradeFrequency === "HIGH") requiredConfluences = 2;
+    if (adminConfig.strategy.tradeFrequency === "LOW") requiredConfluences = 4;
+
+    if (activeCount >= requiredConfluences) {
       systemCycle = { ...systemCycle, status: "EXECUTING", lastAction: `Generating AI Signal for ${symbol}`, timestamp: Date.now() };
       await generateAISignal(symbol, "OMNI_AUTO");
     } else {
       // Live Journaling: Why no entry?
-      const reason = `No entry for ${symbol}: Only ${activeCount} confluences active. Required: 3.`;
+      const reason = `No entry for ${symbol}: Only ${activeCount} confluences active. Required: ${requiredConfluences} (${adminConfig.strategy.tradeFrequency} Frequency).`;
       if (liveJournal.length === 0 || liveJournal[0].message !== reason) {
         liveJournal.unshift({
           timestamp: new Date().toISOString(),
@@ -354,12 +360,16 @@ async function generateAISignal(symbol: string, strategy: string) {
   const analystPrompt = `Analyze ${symbol} at ${chartData.price}. 
   Confluences: ${JSON.stringify(confluences)}. 
   Weights: ${JSON.stringify(currentWeights)}.
-  Identify the current market cycle (Accumulation, Trend, Distribution) and the highest probability setup.`;
+  Trade Frequency Mode: ${adminConfig.strategy.tradeFrequency}.
+  Identify the current market cycle (Accumulation, Trend, Distribution) and the highest probability setup.
+  If Trade Frequency is HIGH (Scalping), look for short-term momentum bursts and tighter setups.`;
 
   // Node 2: Risk Manager (DeepSeek or similar via OpenRouter)
   const riskPrompt = `Given a potential trade on ${symbol}, calculate optimal TP/SL based on ATR and structure. 
   Current Price: ${chartData.price}. 
-  Swings: ${JSON.stringify(chartData.swings)}.`;
+  Swings: ${JSON.stringify(chartData.swings)}.
+  Trade Frequency Mode: ${adminConfig.strategy.tradeFrequency}.
+  If HIGH (Scalping), use tighter SL and TP (e.g., 1:1.5 RR). If LOW (Swing), use wider SL and TP (e.g., 1:3 RR).`;
 
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {

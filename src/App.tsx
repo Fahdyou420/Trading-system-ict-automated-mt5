@@ -915,7 +915,7 @@ export default function App() {
               <div className="space-y-8">
                 <div className="space-y-4">
                   <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Strategy Parameters</h4>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-3 gap-4">
                     <div className="space-y-2">
                       <label className="text-[10px] text-gray-500 uppercase">Min Confidence %</label>
                       <input type="number" defaultValue={serverStatus?.adminConfig?.strategy?.minConfidence} className="w-full bg-black/40 border border-brand-border p-2 rounded text-xs outline-none focus:border-brand-primary" />
@@ -923,6 +923,14 @@ export default function App() {
                     <div className="space-y-2">
                       <label className="text-[10px] text-gray-500 uppercase">Max Drawdown %</label>
                       <input type="number" defaultValue={serverStatus?.adminConfig?.strategy?.maxDrawdown} className="w-full bg-black/40 border border-brand-border p-2 rounded text-xs outline-none focus:border-brand-primary" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] text-gray-500 uppercase">Trade Frequency</label>
+                      <select defaultValue={serverStatus?.adminConfig?.strategy?.tradeFrequency} className="w-full bg-black/40 border border-brand-border p-2 rounded text-xs outline-none focus:border-brand-primary">
+                        <option value="HIGH">HIGH (Scalping)</option>
+                        <option value="MEDIUM">MEDIUM (Day Trading)</option>
+                        <option value="LOW">LOW (Swing Trading)</option>
+                      </select>
                     </div>
                   </div>
                 </div>

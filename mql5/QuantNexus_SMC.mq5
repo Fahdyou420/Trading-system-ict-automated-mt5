@@ -12,6 +12,7 @@
 #property link      "https://www.quantnexus.ai"
 #property version   "1.00"
 #property strict
+#include <Trade\Trade.mqh>
 
 //--- Input Parameters
 input group "=== Risk Management ==="
@@ -21,6 +22,7 @@ input double InpMaxDrawdown     = 10.0;     // Max Drawdown (%)
 input double InpRRRatio         = 2.5;      // Target Risk:Reward
 
 input group "=== Strategy Parameters ==="
+input bool   InpScalpingMode    = true;     // Enable Scalping Mode (Higher Frequency)
 input ENUM_TIMEFRAMES InpHTF    = PERIOD_H1; // Higher Timeframe for Structure
 input int InpOrderBlockLookback = 100;      // Candles to scan for OBs
 input double InpATRMultiplier   = 1.5;      // ATR Multiplier for SL Buffer
@@ -32,7 +34,12 @@ enum ENUM_STRATEGY {
    STRAT_OMNI_AI     // Omni-Strategy AI (Weighted Matrix)
 };
 
-input ENUM_STRATEGY InpStrategy = STRAT_SMC; // Active Strategy
+input ENUM_STRATEGY InpStrategy = STRAT_OMNI_AI; // Active Strategy
+
+input group "=== Trade Management ==="
+input bool   InpUseTrailingStop = true;     // Use Trailing Stop
+input double InpTrailingStopATR = 1.0;      // Trailing Stop ATR Multiplier
+input bool   InpBreakeven       = true;     // Move to Breakeven at 1:1 RR
 
 input group "=== Momentum & Volatility ==="
 input int InpStochK             = 14;       // Stochastic %K
@@ -53,6 +60,7 @@ input string InpServerURL        = "http://localhost:3000"; // Web App API URL
 input int InpSyncInterval       = 1000;     // Sync Interval (ms)
 
 //--- Global Variables
+CTrade trade;
 int handleHTF_OB;
 int handleStoch;
 int handleATR;
@@ -124,28 +132,36 @@ void OnTick()
    bool triggerEntry = false;
    bool isHTFBullish = IdentifyStructure(InpHTF);
    double obLevel = FindUnmitigatedOB(InpHTF);
+   
+   bool isBuy = false;
+   double ai_sl = 0, ai_tp = 0;
 
    // 2. Strategy Execution Logic
    switch(InpStrategy) {
       case STRAT_SMC:
          triggerEntry = CheckConfluence(obLevel, isHTFBullish);
+         isBuy = isHTFBullish;
          break;
       case STRAT_TREND:
          triggerEntry = CheckTrendFollowing();
+         isBuy = true; // Placeholder
          break;
       case STRAT_AI_SIGNAL:
       case STRAT_OMNI_AI:
-         triggerEntry = CheckExternalAISignal();
+         triggerEntry = CheckExternalAISignal(isBuy, ai_sl, ai_tp);
          break;
    }
    
    // 3. Execution
    if(triggerEntry) {
-      ExecuteTrade(isHTFBullish);
+      ExecuteTrade(isBuy, ai_sl, ai_tp);
       SendJournalEntry("ENTRY", _Symbol, "AI_OMNI_SIGNAL", 0);
    }
    
-   // 4. Check for Trade Closures (Journaling)
+   // 4. Trade Management (Trailing Stop / Breakeven)
+   ManageOpenPositions();
+   
+   // 5. Check for Trade Closures (Journaling)
    CheckTradeClosures();
    
    // 5. Update On-Chart Visuals
@@ -348,7 +364,7 @@ bool CheckTrendFollowing() {
    return false;
 }
 
-bool CheckExternalAISignal() {
+bool CheckExternalAISignal(bool &out_isBuy, double &out_sl, double &out_tp) {
    string url = InpServerURL + "/api/mt5/signal?symbol=" + _Symbol;
    char post[], result[];
    string headers;
@@ -362,12 +378,18 @@ bool CheckExternalAISignal() {
       string signal = GetJsonValue(response, "signal");
       string signalID = GetJsonValue(response, "id");
       string insight = GetJsonValue(response, "mentorInsight");
+      string tpStr = GetJsonValue(response, "tp");
+      string slStr = GetJsonValue(response, "sl");
       
       if(signalID != lastAISignalID && (signal == "BUY" || signal == "SELL")) {
          lastAISignalID = signalID;
          DrawMentorUI(insight);
          Alert("QuantNexus AI Signal: ", signal, " for ", _Symbol);
          PlaySound("expert.wav");
+         
+         out_isBuy = (signal == "BUY");
+         out_sl = StringToDouble(slStr);
+         out_tp = StringToDouble(tpStr);
          return true;
       }
       
@@ -377,6 +399,46 @@ bool CheckExternalAISignal() {
    }
    return false;
 }
+
+void ManageOpenPositions() {
+   if(!InpUseTrailingStop && !InpBreakeven) return;
+   
+   double atr[];
+   CopyBuffer(handleATR, 0, 0, 1, atr);
+   double trailDist = atr[0] * InpTrailingStopATR;
+   
+   for(int i=PositionsTotal()-1; i>=0; i--) {
+      ulong ticket = PositionGetTicket(i);
+      if(PositionGetString(POSITION_SYMBOL) == _Symbol) {
+         double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+         double currentPrice = PositionGetDouble(POSITION_PRICE_CURRENT);
+         double currentSL = PositionGetDouble(POSITION_SL);
+         double currentTP = PositionGetDouble(POSITION_TP);
+         long type = PositionGetInteger(POSITION_TYPE);
+         
+         if(type == POSITION_TYPE_BUY) {
+            // Breakeven
+            if(InpBreakeven && currentPrice > openPrice + (openPrice - currentSL) && currentSL < openPrice) {
+               trade.PositionModify(ticket, openPrice, currentTP);
+            }
+            // Trailing Stop
+            if(InpUseTrailingStop && currentPrice - trailDist > currentSL && currentPrice - trailDist > openPrice) {
+               trade.PositionModify(ticket, currentPrice - trailDist, currentTP);
+            }
+         } else if(type == POSITION_TYPE_SELL) {
+            // Breakeven
+            if(InpBreakeven && currentPrice < openPrice - (currentSL - openPrice) && (currentSL > openPrice || currentSL == 0)) {
+               trade.PositionModify(ticket, openPrice, currentTP);
+            }
+            // Trailing Stop
+            if(InpUseTrailingStop && currentPrice + trailDist < currentSL && currentPrice + trailDist < openPrice) {
+               trade.PositionModify(ticket, currentPrice + trailDist, currentTP);
+            }
+         }
+      }
+   }
+}
+
 
 string GetJsonValue(string json, string key) {
    string search = "\"" + key + "\":\"";
@@ -651,34 +713,60 @@ bool CheckConfluence(double obLevel, bool bullish) {
    return false;
 }
 
-void ExecuteTrade(bool buy) {
+void ExecuteTrade(bool buy, double ai_sl = 0, double ai_tp = 0) {
    double riskAmount = AccountInfoDouble(ACCOUNT_BALANCE) * InpRiskPerTrade / 100.0;
    double atr[];
    CopyBuffer(handleATR, 0, 0, 1, atr);
    
    double entryPrice = buy ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double slDistance = atr[0] * InpATRMultiplier;
-   double slPrice = buy ? (entryPrice - slDistance) : (entryPrice + slDistance);
    
-   // Dynamic TP Calculation: Initially 2x SL distance
-   double tpDistance = slDistance * 2.0;
-   double tpPrice = buy ? (entryPrice + tpDistance) : (entryPrice - tpDistance);
+   double slPrice = ai_sl;
+   double tpPrice = ai_tp;
    
-   // Option to target opposing liquidity if it's closer
-   double opposingLiquidity = FindOpposingLiquidity(buy);
-   if(opposingLiquidity > 0) {
-      if(buy && opposingLiquidity < tpPrice && opposingLiquidity > entryPrice) {
-         tpPrice = opposingLiquidity;
-         Print("Dynamic TP: Target adjusted to Bearish OB at ", tpPrice);
-      } else if(!buy && opposingLiquidity > tpPrice && opposingLiquidity < entryPrice) {
-         tpPrice = opposingLiquidity;
-         Print("Dynamic TP: Target adjusted to Bullish OB at ", tpPrice);
+   if(slPrice == 0) {
+      double slDistance = atr[0] * InpATRMultiplier;
+      slPrice = buy ? (entryPrice - slDistance) : (entryPrice + slDistance);
+   }
+   
+   if(tpPrice == 0) {
+      double slDistance = MathAbs(entryPrice - slPrice);
+      double tpDistance = slDistance * InpRRRatio;
+      tpPrice = buy ? (entryPrice + tpDistance) : (entryPrice - tpDistance);
+      
+      // Option to target opposing liquidity if it's closer
+      double opposingLiquidity = FindOpposingLiquidity(buy);
+      if(opposingLiquidity > 0) {
+         if(buy && opposingLiquidity < tpPrice && opposingLiquidity > entryPrice) {
+            tpPrice = opposingLiquidity;
+            Print("Dynamic TP: Target adjusted to Bearish OB at ", tpPrice);
+         } else if(!buy && opposingLiquidity > tpPrice && opposingLiquidity < entryPrice) {
+            tpPrice = opposingLiquidity;
+            Print("Dynamic TP: Target adjusted to Bullish OB at ", tpPrice);
+         }
       }
    }
 
    double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-   double lotSize = NormalizeDouble(riskAmount / (slDistance / tickSize * SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE)), 2);
+   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double slPoints = MathAbs(entryPrice - slPrice) / tickSize;
+   
+   double lotSize = 0.01;
+   if(slPoints > 0 && tickValue > 0) {
+      lotSize = NormalizeDouble(riskAmount / (slPoints * tickValue), 2);
+   }
+   
+   double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   if(lotSize < minLot) lotSize = minLot;
+   if(lotSize > maxLot) lotSize = maxLot;
    
    PrintFormat("QuantNexus EXECUTION | %s | Lots: %.2f | Entry: %.5f | SL: %.5f | TP: %.5f", 
                buy ? "BUY" : "SELL", lotSize, entryPrice, slPrice, tpPrice);
+               
+   if(buy) {
+      trade.Buy(lotSize, _Symbol, entryPrice, slPrice, tpPrice, "QuantNexus AI");
+   } else {
+      trade.Sell(lotSize, _Symbol, entryPrice, slPrice, tpPrice, "QuantNexus AI");
+   }
 }
+
